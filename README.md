@@ -32,34 +32,45 @@ Generates structured JSON + interactive HTML dashboard
 
 ### Prerequisites
 
-- LLVM 22.1.8 (or compatible) installed
+- LLVM 17+ (tested with 22.1.8) installed
 - CMake 3.20+
 - Ninja (recommended) or Make
+- A C++17 compiler (Clang recommended)
 
 ### Build
 
 ```bash
-cd C:\LLVM-full\build
+# Set LLVM_DIR to your LLVM installation
+export LLVM_DIR=/path/to/llvm
+
+# Configure and build
+mkdir build && cd build
 cmake -G Ninja \
-  -DCMAKE_CXX_COMPILER="<llvm-path>/bin/clang-cl.exe" \
-  -DCMAKE_LINKER="<llvm-path>/bin/lld-link.exe" \
+  -DLLVM_DIR=$LLVM_DIR/lib/cmake/llvm \
+  -DCMAKE_CXX_COMPILER=$LLVM_DIR/bin/clang++ \
   ..
 ninja
+```
+
+Or use the build script:
+```bash
+export LLVM_DIR=/path/to/llvm
+bash run_lpta.sh input.ll
 ```
 
 ### Run
 
 ```bash
 # Analyze with -O2 (default)
-lpta_test.exe <input.ll> [output_dir]
+./lpta_test input.ll [output_dir]
 
 # Analyze with different optimization levels
-lpta_test.exe <input.ll> report -O0
-lpta_test.exe <input.ll> report -O2
-lpta_test.exe <input.ll> report -O3
+./lpta_test input.ll report -O0
+./lpta_test input.ll report -O2
+./lpta_test input.ll report -O3
 
 # With IR snapshots for selected passes
-lpta_test.exe <input.ll> report -O2 --snapshots
+./lpta_test input.ll report -O2 --snapshots
 ```
 
 ### View Dashboard
@@ -146,7 +157,7 @@ Object size measurement uses `llc` to compile before/after IR to assembly, then 
 
 | File | Purpose |
 |------|---------|
-| `lpta_test.cpp` | Main implementation (~750 lines) |
+| `lpta_test.cpp` | Main implementation (~790 lines) |
 | `dashboard.html` | Interactive HTML dashboard |
 | `CMakeLists.txt` | Build configuration |
 | `run_lpta.sh` | One-command build + run script |
@@ -174,4 +185,4 @@ real_test.ll with -O2:
 
 ## License
 
-This project was built for a hackathon. See the original LLVM license for LLVM-related components.
+MIT License. See [LICENSE](LICENSE) for details. LLVM components follow the [Apache 2.0 License](https://llvm.org/LICENSE.txt).

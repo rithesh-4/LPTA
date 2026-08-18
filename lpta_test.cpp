@@ -447,12 +447,25 @@ static void saveIRSnapshot(const std::string &suffix, const Any &IR,
 // Codegen Measurement
 // ============================================================
 
-// Discover llc.exe path: check LLVM_DIR env var, then look relative to executable
+// Discover llc path: check LLVM_DIR env var, then look relative to executable
 static std::string findLlcExe() {
+#ifdef _WIN32
+    const char *exe_names[] = {"llc.exe", nullptr};
+#else
+    const char *exe_names[] = {"llc", nullptr};
+#endif
+    auto tryFind = [&](const std::string &dir) -> std::string {
+        for (int i = 0; exe_names[i]; i++) {
+            fs::path candidate = fs::path(dir) / "bin" / exe_names[i];
+            if (fs::exists(candidate)) return candidate.string();
+        }
+        return "";
+    };
+
     // 1. Check LLVM_DIR environment variable
     if (const char *env = std::getenv("LLVM_DIR")) {
-        std::string candidate = std::string(env) + "/bin/llc.exe";
-        if (fs::exists(candidate)) return candidate;
+        std::string r = tryFind(std::string(env));
+        if (!r.empty()) return r;
     }
     // 2. Look in same directory as this executable
     std::string exe_dir;
@@ -466,11 +479,14 @@ static std::string findLlcExe() {
     if (len > 0) exe_dir = fs::path(std::string(buf, len)).parent_path().string();
     #endif
     if (!exe_dir.empty()) {
-        // Try sibling llvm install: ../clang+llvm-.../bin/llc.exe
         for (auto &entry : fs::directory_iterator(fs::path(exe_dir).parent_path())) {
-            if (entry.is_directory() && entry.path().filename().string().find("clang+llvm") != std::string::npos) {
-                std::string candidate = entry.path().string() + "/bin/llc.exe";
-                if (fs::exists(candidate)) return candidate;
+            if (entry.is_directory()) {
+                std::string fn = entry.path().filename().string();
+                if (fn.find("clang+llvm") != std::string::npos ||
+                    fn.find("llvm") != std::string::npos) {
+                    std::string r = tryFind(entry.path().string());
+                    if (!r.empty()) return r;
+                }
             }
         }
     }
@@ -491,6 +507,27 @@ static unsigned countAsmLines(const std::string &path) {
     return (bytes << 16) | count;
 }
 
+static int runLlc(const std::string &llc, const std::string &input,
+                   const std::string &output) {
+#ifdef _WIN32
+    // On Windows, system() uses cmd.exe which chokes on nested quotes.
+    // Write a temp .bat file and execute that instead.
+    std::string bat = output + ".run_llc.bat";
+    {
+        std::ofstream b(bat);
+        b << "@echo off\n";
+        b << "\"" << llc << "\" -filetype=asm -o \"" << output << "\" \"" << input << "\"\n";
+    }
+    int rc = system(bat.c_str());
+    fs::remove(bat);
+    return rc;
+#else
+    std::string cmd = "\"" + llc + "\" -filetype=asm -o \"" +
+                      output + "\" \"" + input + "\"";
+    return system(cmd.c_str());
+#endif
+}
+
 static CodegenResult measureCodegen(const std::string &ir_before_path,
                                     const std::string &ir_after_path,
                                     const std::string &output_dir) {
@@ -498,27 +535,13 @@ static CodegenResult measureCodegen(const std::string &ir_before_path,
     std::string llc = findLlcExe();
     errs() << "  Using llc: " << llc << "\n";
 
-    // Write a temp batch script to run llc (avoids Windows path issues)
-    std::string bat_before = output_dir + "/run_llc_before.bat";
-    std::string bat_after = output_dir + "/run_llc_after.bat";
-    {
-        std::ofstream b(bat_before);
-        b << "@echo off\n";
-        b << "\"" << llc << "\" -filetype=asm -o \"" << output_dir << "\\codegen_before.s\" \"" << ir_before_path << "\"\n";
-    }
-    {
-        std::ofstream b(bat_after);
-        b << "@echo off\n";
-        b << "\"" << llc << "\" -filetype=asm -o \"" << output_dir << "\\codegen_after.s\" \"" << ir_after_path << "\"\n";
-    }
-
-    system(bat_before.c_str());
-    system(bat_after.c_str());
-
-    // Count lines
     std::string before_asm = output_dir + "/codegen_before.s";
     std::string after_asm = output_dir + "/codegen_after.s";
 
+    runLlc(llc, ir_before_path, before_asm);
+    runLlc(llc, ir_after_path, after_asm);
+
+    // Count lines
     {
         std::ifstream f(before_asm);
         std::string line;
