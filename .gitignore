@@ -1,0 +1,33 @@
+# Build output
+build/
+
+# LLVM installation (too large for git)
+clang+llvm-*/
+llvm.tar.xz
+
+# Generated reports (output from running LPTA)
+report/
+report_real/
+
+# Generated assembly files
+*.s
+*.o
+*.obj
+
+# Temp batch scripts
+run_llc_*.bat
+
+# Generated IR snapshots
+ir_before_opt.ll
+ir_after_opt.ll
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

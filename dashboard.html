@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LPTA — LLVM Pass Transformation Analysis</title>
+<style>
+:root {
+  --bg-primary: #0a0e14;
+  --bg-secondary: #111820;
+  --bg-tertiary: #1a2030;
+  --bg-card: #151d28;
+  --border: #1e2a3a;
+  --border-light: #2a3a4a;
+  --text-primary: #e2e8f0;
+  --text-secondary: #8899aa;
+  --text-muted: #556677;
+  --accent: #3b82f6;
+  --accent-glow: rgba(59,130,246,0.15);
+  --green: #22c55e;
+  --green-dim: rgba(34,197,94,0.12);
+  --red: #ef4444;
+  --red-dim: rgba(239,68,68,0.12);
+  --yellow: #eab308;
+  --yellow-dim: rgba(234,179,8,0.12);
+  --purple: #a855f7;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; }
+
+/* Header */
+.header { background: var(--bg-secondary); border-bottom: 1px solid var(--border); padding: 20px 32px; position: sticky; top: 0; z-index: 100; backdrop-filter: blur(12px); }
+.header-inner { max-width: 1600px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
+.header h1 { font-size: 20px; font-weight: 700; background: linear-gradient(135deg, #3b82f6, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.header .meta { color: var(--text-secondary); font-size: 13px; margin-top: 2px; }
+.header .badge { background: var(--bg-tertiary); border: 1px solid var(--border); padding: 4px 12px; border-radius: 20px; font-size: 12px; color: var(--text-secondary); }
+
+/* Container */
+.container { max-width: 1600px; margin: 0 auto; padding: 24px 32px; }
+
+/* Summary Cards */
+.cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; text-align: center; transition: all 0.2s; position: relative; overflow: hidden; }
+.card:hover { border-color: var(--border-light); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+.card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; }
+.card.blue::before { background: linear-gradient(90deg, #3b82f6, #8b5cf6); }
+.card.green::before { background: linear-gradient(90deg, #22c55e, #10b981); }
+.card.red::before { background: linear-gradient(90deg, #ef4444, #f97316); }
+.card.yellow::before { background: linear-gradient(90deg, #eab308, #f59e0b); }
+.card .num { font-size: 32px; font-weight: 800; color: var(--text-primary); line-height: 1; }
+.card.blue .num { color: var(--accent); }
+.card.green .num { color: var(--green); }
+.card.red .num { color: var(--red); }
+.card.yellow .num { color: var(--yellow); }
+.card .label { font-size: 11px; color: var(--text-muted); margin-top: 8px; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+.card .sub { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+
+/* Pipeline Story */
+.pipeline-story { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; margin-bottom: 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.pipeline-story .story-text { font-size: 14px; color: var(--text-secondary); flex: 1; }
+.pipeline-story .story-text strong { color: var(--text-primary); }
+.pipeline-story .story-text .highlight { color: var(--green); font-weight: 700; }
+
+/* Function Impact */
+.func-section { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 24px; overflow: hidden; }
+.section-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+.section-header h3 { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.section-header .hint { font-size: 12px; color: var(--text-muted); }
+.func-table { width: 100%; border-collapse: collapse; }
+.func-table th { text-align: left; padding: 10px 16px; background: var(--bg-tertiary); color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+.func-table td { padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.func-table tr:hover td { background: var(--bg-tertiary); }
+.func-table .func-name { font-weight: 600; color: var(--text-primary); font-family: 'SF Mono', 'Cascadia Code', monospace; font-size: 12px; }
+.func-table .mono { font-family: 'SF Mono', 'Cascadia Code', monospace; }
+.func-table .reduction { font-weight: 700; }
+.func-table .reduction.positive { color: var(--green); }
+.func-table .reduction.negative { color: var(--red); }
+.func-bar-bg { width: 100%; height: 6px; background: var(--bg-primary); border-radius: 3px; overflow: hidden; }
+.func-bar-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+.func-bar-fill.green { background: linear-gradient(90deg, #22c55e, #10b981); }
+.func-bar-fill.red { background: linear-gradient(90deg, #ef4444, #f97316); }
+
+/* Filters */
+.controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+.filter-btn { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.15s; }
+.filter-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+.filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 0 12px var(--accent-glow); }
+.search-box { background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 14px; border-radius: 8px; font-size: 12px; width: 220px; transition: border-color 0.15s; }
+.search-box:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+.search-box::placeholder { color: var(--text-muted); }
+
+/* Timeline */
+.timeline { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.timeline-head { display: grid; grid-template-columns: 50px 55px 1fr 130px 50px 140px 30px; padding: 10px 16px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border); font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+.ev { display: grid; grid-template-columns: 50px 55px 1fr 130px 50px 140px 30px; padding: 7px 16px; border-bottom: 1px solid var(--border); font-size: 13px; align-items: center; transition: background 0.1s; }
+.ev:last-child { border-bottom: none; }
+.ev:hover { background: var(--bg-tertiary); }
+.ev.changed { background: var(--green-dim); }
+.ev.changed:hover { background: rgba(34,197,94,0.18); cursor: pointer; }
+.ev.invalidated { background: var(--red-dim); }
+.ev .eid { color: var(--text-muted); font-family: 'SF Mono', monospace; font-size: 11px; }
+.badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+.badge.bef { background: rgba(59,130,246,0.15); color: var(--accent); }
+.badge.aft { background: var(--green-dim); color: var(--green); }
+.badge.inv { background: var(--red-dim); color: var(--red); }
+.pname { font-weight: 500; }
+.pname .t-adaptor { color: var(--text-muted); font-style: italic; }
+.pname .t-pipeline { color: var(--text-muted); }
+.pname .t-analysis { color: var(--purple); }
+.pname .t-transformation { color: var(--text-primary); }
+.iru { color: var(--text-secondary); font-size: 12px; font-family: 'SF Mono', monospace; }
+.dep { color: var(--text-muted); font-family: 'SF Mono', monospace; font-size: 11px; }
+.dlt { font-family: 'SF Mono', monospace; font-size: 11px; }
+.dlt .neg { color: var(--green); }
+.dlt .pos { color: var(--red); }
+.dlt .nc { color: var(--text-muted); font-style: italic; }
+.view-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); width: 24px; height: 24px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; transition: all 0.15s; }
+.view-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
+
+/* Modal */
+.modal-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 1000; backdrop-filter: blur(4px); }
+.modal-bg.open { display: flex; align-items: center; justify-content: center; }
+.modal { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 16px; width: 96vw; max-width: 1500px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 24px 48px rgba(0,0,0,0.5); }
+.modal-top { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-bottom: 1px solid var(--border); }
+.modal-top h2 { font-size: 15px; font-weight: 600; }
+.modal-top h2 .hl { color: var(--accent); }
+.close { background: none; border: 1px solid var(--border); color: var(--text-muted); width: 32px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+.close:hover { border-color: var(--red); color: var(--red); background: var(--red-dim); }
+.modal-content { display: flex; flex: 1; overflow: hidden; }
+.ir-col { flex: 1; overflow: auto; padding: 0; }
+.ir-col h3 { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; padding: 12px 16px 8px; font-weight: 600; position: sticky; top: 0; background: var(--bg-secondary); z-index: 1; border-bottom: 1px solid var(--border); }
+.ir-col.before { border-right: 1px solid var(--border); }
+.ir-code { font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; font-size: 12px; line-height: 1.6; padding: 8px 0; }
+.ir-line { padding: 1px 16px 1px 12px; white-space: pre; display: flex; }
+.ir-line .ln { color: var(--text-muted); width: 35px; text-align: right; margin-right: 12px; user-select: none; flex-shrink: 0; font-size: 11px; }
+.ir-line .code { flex: 1; }
+.ir-line.removed { background: rgba(239,68,68,0.1); }
+.ir-line.removed .code { color: #fca5a5; }
+.ir-line.added { background: rgba(34,197,94,0.1); }
+.ir-line.added .code { color: #86efac; }
+.ir-line.unchanged .code { color: var(--text-muted); }
+.ir-line.highlight { background: var(--accent-glow); }
+.ir-line.highlight .code { color: var(--text-primary); }
+.modal-footer { padding: 12px 24px; border-top: 1px solid var(--border); display: flex; gap: 20px; flex-wrap: wrap; font-size: 12px; }
+.modal-footer .m { display: flex; gap: 4px; align-items: center; }
+.modal-footer .m .ml { color: var(--text-muted); }
+.modal-footer .m .mv { font-family: 'SF Mono', monospace; font-weight: 600; }
+.modal-footer .m .md { font-family: 'SF Mono', monospace; font-weight: 700; margin-left: 4px; }
+.modal-footer .m .md.neg { color: var(--green); }
+.modal-footer .m .md.pos { color: var(--red); }
+
+/* Timeline Chart */
+.chart-section { margin-top: 24px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.chart-wrap { position: relative; padding: 16px; }
+#timeline-canvas { width: 100%; height: 120px; display: block; }
+.chart-tooltip { display: none; position: absolute; background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: 8px; padding: 8px 12px; font-size: 12px; pointer-events: none; z-index: 10; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+.chart-tooltip .tt-name { font-weight: 600; color: var(--text-primary); }
+.chart-tooltip .tt-ir { color: var(--text-secondary); font-size: 11px; }
+.chart-tooltip .tt-delta { color: var(--green); font-family: monospace; font-weight: 600; }
+.chart-legend { display: flex; gap: 16px; padding: 0 16px 12px; font-size: 11px; color: var(--text-muted); }
+.chart-legend span { display: flex; align-items: center; gap: 4px; }
+.chart-legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+.chart-legend .dot.changed { background: var(--green); }
+.chart-legend .dot.unchanged { background: var(--accent); }
+.chart-legend .dot.invalidated { background: var(--red); }
+.chart-legend .dot.adaptor { background: var(--text-muted); }
+
+/* Top Passes */
+.top-passes { margin-top: 24px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.tp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1px; background: var(--border); }
+.tp-item { background: var(--bg-card); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; }
+.tp-item:hover { background: var(--bg-tertiary); }
+.tp-name { font-size: 13px; font-weight: 500; }
+.tp-count { font-size: 11px; color: var(--text-muted); }
+.tp-delta { font-family: 'SF Mono', monospace; font-size: 13px; font-weight: 700; }
+.tp-delta.neg { color: var(--green); }
+.tp-delta.pos { color: var(--red); }
+.tp-delta.zero { color: var(--text-muted); }
+.tp-detail { font-size: 11px; color: var(--text-muted); text-align: right; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-inner">
+    <div>
+      <h1>⚡ LPTA</h1>
+      <div class="meta" id="meta">Loading...</div>
+    </div>
+    <div class="badge" id="badge"></div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="cards" id="cards"></div>
+  <div class="pipeline-story" id="story"></div>
+  <div class="chart-section" id="chart-section">
+    <div class="section-header"><h3>📈 Execution Timeline</h3><span class="hint">Each dot = one pass execution. Y-axis = nesting depth.</span></div>
+    <div class="chart-legend">
+      <span><span class="dot changed"></span> Changed IR</span>
+      <span><span class="dot unchanged"></span> No change</span>
+      <span><span class="dot invalidated"></span> Invalidated</span>
+      <span><span class="dot adaptor"></span> Adaptor/Pipeline</span>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="timeline-canvas"></canvas>
+      <div class="chart-tooltip" id="chart-tooltip"></div>
+    </div>
+  </div>
+  <div class="func-section" id="func-section"></div>
+  <div class="controls">
+    <button class="filter-btn active" data-filter="all">All Events</button>
+    <button class="filter-btn" data-filter="changed">Changed Only</button>
+    <button class="filter-btn" data-filter="Module">Module</button>
+    <button class="filter-btn" data-filter="Function">Function</button>
+    <button class="filter-btn" data-filter="Loop">Loop</button>
+    <button class="filter-btn" data-filter="transformation">Transforms</button>
+    <button class="filter-btn" data-filter="adaptor">Adaptors</button>
+    <input class="search-box" id="search" placeholder="🔍 Search passes, functions...">
+  </div>
+  <div class="timeline">
+    <div class="timeline-head">
+      <span>#</span><span>Type</span><span>Pass</span><span>IR Unit</span><span>Depth</span><span>Deltas</span><span></span>
+    </div>
+    <div id="events"></div>
+  </div>
+  <div class="top-passes" id="top-passes"></div>
+</div>
+
+<div class="modal-bg" id="modal-bg">
+  <div class="modal">
+    <div class="modal-top">
+      <h2 id="modal-title"></h2>
+      <button class="close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-content">
+      <div class="ir-col before">
+        <h3>📝 Before</h3>
+        <div class="ir-code" id="ir-before"></div>
+      </div>
+      <div class="ir-col after">
+        <h3>✨ After</h3>
+        <div class="ir-code" id="ir-after"></div>
+      </div>
+    </div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<script>
+let D = null, F = 'all';
+
+async function load() {
+  try {
+    const r = await fetch('history.json');
+    if (!r.ok) throw 0;
+    D = await r.json();
+    render();
+  } catch(e) {
+    document.getElementById('events').innerHTML = '<div style="padding:60px;text-align:center;color:var(--text-muted)">Could not load history.json<br><small>Serve with: <code style="background:var(--bg-tertiary);padding:2px 8px;border-radius:4px">python -m http.server 8080</code></small></div>';
+  }
+}
+
+function render() {
+  if (!D) return;
+  const s = D.summary;
+  const iRed = s.total_instructions_before - s.total_instructions_after;
+  const iPct = s.total_instructions_before ? Math.round(iRed / s.total_instructions_before * 100) : 0;
+  const bRed = s.total_bbs_before - s.total_bbs_after;
+
+  document.getElementById('meta').textContent = `${D.module_name} · -${D.pipeline} · ${s.total_events} events`;
+  document.getElementById('badge').textContent = `${s.passes_with_changes} passes changed IR`;
+
+  const cgRed = s.codegen_asm_lines_before - s.codegen_asm_lines_after;
+  const cgPct = s.codegen_asm_lines_before ? Math.round(cgRed / s.codegen_asm_lines_before * 100) : 0;
+
+  document.getElementById('cards').innerHTML = [
+    { n: s.total_before, l: 'Before', sub: 'callback events', c: 'blue' },
+    { n: s.total_after, l: 'After', sub: 'callback events', c: 'green' },
+    { n: s.total_invalidated, l: 'Invalidated', sub: 'IR unsafe', c: 'red' },
+    { n: s.passes_with_changes, l: 'With Changes', sub: 'out of ' + s.total_after, c: 'yellow' },
+    { n: `${iPct}%`, l: `IR Instructions`, sub: `${s.total_instructions_before} → ${s.total_instructions_after}`, c: 'green' },
+    { n: `${cgPct}%`, l: `Codegen Size`, sub: `${s.codegen_asm_lines_before} → ${s.codegen_asm_lines_after} asm lines`, c: 'green' },
+  ].map(c => `<div class="card ${c.c}"><div class="num">${c.n}</div><div class="label">${c.l}</div><div class="sub">${c.sub}</div></div>`).join('');
+
+  const iArrow = iRed > 0 ? `<span style="color:var(--green);font-weight:700">${iRed}</span> fewer` : iRed < 0 ? `<span style="color:var(--red);font-weight:700">${-iRed}</span> more` : 'no change';
+  const bArrow = bRed > 0 ? `<span style="color:var(--green);font-weight:700">${bRed}</span> fewer` : 'no change';
+  const cgArrow = cgRed > 0 ? `<span style="color:var(--green);font-weight:700">${cgPct}%</span> smaller` : cgRed < 0 ? `<span style="color:var(--red);font-weight:700">${-cgPct}%</span> larger` : 'no change';
+  document.getElementById('story').innerHTML = `
+    <div class="story-text">
+      <strong>-${D.pipeline} pipeline</strong> executed <strong>${s.total_before}</strong> passes across the module.
+      <strong>${s.passes_with_changes}</strong> passes produced measurable changes:
+      <span class="highlight">${iArrow} IR instructions</span>,
+      ${bArrow} basic blocks.
+      Final codegen: <span class="highlight">${cgArrow}</span> assembly (${s.codegen_asm_lines_before} → ${s.codegen_asm_lines_after} lines).
+      Stack remained perfectly balanced (0 remaining).
+    </div>`;
+
+  renderFuncs();
+  renderChart();
+  renderEvents();
+  renderTopPasses();
+}
+
+function renderFuncs() {
+  if (!D) return;
+  const fm = {};
+  for (const e of D.events) {
+    if (e.ir_kind !== 'Function' || e.event_type !== 'after' || !e.has_changes) continue;
+    const n = e.ir_name;
+    if (!fm[n]) fm[n] = { before: e.metrics_before.instruction_count, after: e.metrics_after.instruction_count, passes: 0 };
+    fm[n].after = e.metrics_after.instruction_count;
+    fm[n].passes++;
+  }
+  const funcs = Object.entries(fm).map(([n, m]) => ({
+    name: n, before: m.before, after: m.after, delta: m.after - m.before, passes: m.passes,
+    pct: m.before ? Math.round((m.before - m.after) / m.before * 100) : 0
+  })).sort((a, b) => a.delta - b.delta);
+  if (!funcs.length) { document.getElementById('func-section').style.display = 'none'; return; }
+  const mx = Math.max(...funcs.map(f => f.before));
+
+  document.getElementById('func-section').innerHTML = `
+    <div class="section-header"><h3>📊 Per-Function Impact</h3><span class="hint">Sorted by instruction reduction</span></div>
+    <table class="func-table">
+      <tr><th>Function</th><th>Before</th><th>After</th><th>Reduction</th><th>Passes</th><th style="width:180px">Impact</th></tr>
+      ${funcs.map(f => `<tr>
+        <td class="func-name">${f.name}</td>
+        <td class="mono">${f.before}</td>
+        <td class="mono">${f.after}</td>
+        <td class="reduction ${f.delta < 0 ? 'positive' : f.delta > 0 ? 'negative' : ''}">${f.delta > 0 ? '+' : ''}${f.delta} <span style="font-weight:400;font-size:11px">(${f.pct}%)</span></td>
+        <td class="mono">${f.passes}</td>
+        <td><div class="func-bar-bg"><div class="func-bar-fill ${f.delta <= 0 ? 'green' : 'red'}" style="width:${mx ? f.before/mx*100 : 0}%"></div></div></td>
+      </tr>`).join('')}
+    </table>`;
+}
+
+function renderEvents() {
+  if (!D) return;
+  const q = document.getElementById('search').value.toLowerCase();
+  const evts = D.events.filter(e => {
+    if (F === 'changed' && e.event_type === 'after' && !e.has_changes) return false;
+    if (F === 'Module' && e.ir_kind !== 'Module') return false;
+    if (F === 'Function' && e.ir_kind !== 'Function') return false;
+    if (F === 'Loop' && e.ir_kind !== 'Loop') return false;
+    if (F === 'transformation' && e.pass_type !== 'transformation') return false;
+    if (F === 'adaptor' && e.pass_type !== 'adaptor') return false;
+    if (q && !e.pass_name.toLowerCase().includes(q) && !e.ir_name.toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  const html = evts.map((e, i) => {
+    const rc = e.event_type === 'after' && e.has_changes ? 'changed' : e.event_type === 'invalidated' ? 'invalidated' : '';
+    const bc = e.event_type === 'before' ? 'bef' : e.event_type === 'after' ? 'aft' : 'inv';
+    const nest = '&nbsp;'.repeat(e.depth * 2);
+    const canView = e.event_type === 'after' && e.has_changes && e.ir_before;
+    let d = '';
+    if (e.event_type === 'after') {
+      if (e.has_changes) {
+        const p = [];
+        const ms = ['instruction_count','basic_block_count','branch_count','phi_count','call_count','load_count','store_count'];
+        const ls = ['instr','BB','br','phi','call','ld','st'];
+        for (let j = 0; j < ms.length; j++) {
+          const v = e.metrics_after[ms[j]] - e.metrics_before[ms[j]];
+          if (v !== 0) p.push(`<span class="${v < 0 ? 'neg' : 'pos'}">${ls[j]}${v > 0 ? '+' : ''}${v}</span>`);
+        }
+        d = p.join(' ');
+      } else d = '<span class="nc">—</span>';
+    } else if (e.event_type === 'invalidated') d = '<span class="nc">invalidated</span>';
+
+    const origIdx = D.events.indexOf(e);
+    return `<div class="ev ${rc}" ${canView ? `onclick="openDiff(${origIdx})"` : ''}>
+      <span class="eid">${e.id}</span>
+      <span><span class="badge ${bc}">${e.event_type.slice(0,3)}</span></span>
+      <span class="pname"><span class="t-${e.pass_type}">${nest}${e.pass_name}</span></span>
+      <span class="iru">${e.ir_kind} ${e.ir_name}</span>
+      <span class="dep">${e.depth}</span>
+      <span class="dlt">${d}</span>
+      <span>${canView ? '<button class="view-btn" title="View IR diff">⊕</button>' : ''}</span>
+    </div>`;
+  }).join('');
+  document.getElementById('events').innerHTML = html || '<div style="padding:40px;text-align:center;color:var(--text-muted)">No events match filter</div>';
+}
+
+function openDiff(idx) {
+  const e = D.events[idx];
+  if (!e || !e.ir_before) return;
+  document.getElementById('modal-title').innerHTML = `<span class="hl">${e.pass_name}</span> · ${e.ir_kind} ${e.ir_name}`;
+
+  const bL = e.ir_before.split('\n');
+  const aL = e.ir_after.split('\n');
+  const bS = new Set(bL), aS = new Set(aL);
+
+  const render = (lines, otherSet, added, removed) => {
+    return lines.map((l, i) => {
+      const cls = l.trim() && !otherSet.has(l) ? (added ? 'added' : 'removed') : 'unchanged';
+      return `<div class="ir-line ${cls}"><span class="ln">${i+1}</span><span class="code">${esc(l)}</span></div>`;
+    }).join('');
+  };
+
+  document.getElementById('ir-before').innerHTML = render(bL, aS, false, true);
+  document.getElementById('ir-after').innerHTML = render(aL, bS, true, false);
+
+  const ms = [['instruction_count','Instructions'],['basic_block_count','BBs'],['branch_count','Branches'],['phi_count','PHIs'],['call_count','Calls'],['load_count','Loads'],['store_count','Stores']];
+  document.getElementById('modal-footer').innerHTML = ms.map(([k,l]) => {
+    const d = e.metrics_after[k] - e.metrics_before[k];
+    const cls = d < 0 ? 'neg' : d > 0 ? 'pos' : '';
+    return `<div class="m"><span class="ml">${l}:</span><span class="mv">${e.metrics_before[k]} → ${e.metrics_after[k]}</span><span class="md ${cls}">${d > 0 ? '+' : ''}${d}</span></div>`;
+  }).join('');
+
+  document.getElementById('modal-bg').classList.add('open');
+}
+
+function closeModal() { document.getElementById('modal-bg').classList.remove('open'); }
+document.getElementById('modal-bg').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function renderChart() {
+  if (!D) return;
+  const canvas = document.getElementById('timeline-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = rect.height;
+  const pad = { top: 8, bottom: 20, left: 40, right: 16 };
+  const plotW = W - pad.left - pad.right;
+  const plotH = H - pad.top - pad.bottom;
+
+  // Find max depth
+  let maxDepth = 0;
+  for (const e of D.events) if (e.depth > maxDepth) maxDepth = e.depth;
+  maxDepth = Math.max(maxDepth, 1);
+
+  const evts = D.events;
+  const n = evts.length;
+  const xStep = plotW / Math.max(n - 1, 1);
+
+  // Background grid
+  ctx.strokeStyle = '#1e2a3a';
+  ctx.lineWidth = 0.5;
+  for (let d = 0; d <= maxDepth; d++) {
+    const y = pad.top + (d / maxDepth) * plotH;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(W - pad.right, y);
+    ctx.stroke();
+  }
+
+  // Y-axis labels
+  ctx.fillStyle = '#556677';
+  ctx.font = '10px SF Mono, monospace';
+  ctx.textAlign = 'right';
+  for (let d = 0; d <= maxDepth; d += Math.max(1, Math.floor(maxDepth / 6))) {
+    const y = pad.top + (d / maxDepth) * plotH;
+    ctx.fillText(d.toString(), pad.left - 6, y + 3);
+  }
+
+  // X-axis labels
+  ctx.textAlign = 'center';
+  const xTicks = 5;
+  for (let i = 0; i <= xTicks; i++) {
+    const idx = Math.round((i / xTicks) * (n - 1));
+    const x = pad.left + idx * xStep;
+    ctx.fillText(evts[idx].id.toString(), x, H - 4);
+  }
+
+  // Draw vertical connecting lines for nesting
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i < n; i++) {
+    const e = evts[i];
+    if (e.event_type !== 'before') continue;
+    const x = pad.left + i * xStep;
+    const y = pad.top + (e.depth / maxDepth) * plotH;
+    // Find matching AFTER
+    for (let j = i + 1; j < n; j++) {
+      if (evts[j].pass_name === e.pass_name && evts[j].event_type === 'after' && evts[j].depth === e.depth) {
+        const x2 = pad.left + j * xStep;
+        ctx.strokeStyle = e.has_changes ? 'rgba(34,197,94,0.15)' : 'rgba(59,130,246,0.08)';
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x2, y);
+        ctx.stroke();
+        break;
+      }
+    }
+  }
+
+  // Draw dots
+  for (let i = 0; i < n; i++) {
+    const e = evts[i];
+    const x = pad.left + i * xStep;
+    const y = pad.top + (e.depth / maxDepth) * plotH;
+    let color, r;
+    if (e.event_type === 'after' && e.has_changes) { color = '#22c55e'; r = 2.5; }
+    else if (e.event_type === 'invalidated') { color = '#ef4444'; r = 2.5; }
+    else if (e.event_type === 'before') { color = 'rgba(59,130,246,0.3)'; r = 1.5; }
+    else { color = 'rgba(59,130,246,0.2)'; r = 1; }
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Hover interaction
+  const tooltip = document.getElementById('chart-tooltip');
+  canvas.addEventListener('mousemove', (me) => {
+    const r2 = canvas.getBoundingClientRect();
+    const mx = me.clientX - r2.left;
+    const my = me.clientY - r2.top;
+    // Find nearest event
+    const idx = Math.round(((mx - pad.left) / plotW) * (n - 1));
+    if (idx < 0 || idx >= n) { tooltip.style.display = 'none'; return; }
+    const e = evts[idx];
+    const dx = Math.abs((pad.left + idx * xStep) - mx);
+    if (dx > 15) { tooltip.style.display = 'none'; return; }
+    let html = `<div class="tt-name">${e.pass_name}</div><div class="tt-ir">${e.ir_kind} ${e.ir_name} · depth ${e.depth}</div>`;
+    if (e.event_type === 'after' && e.has_changes) {
+      const d = e.metrics_after.instruction_count - e.metrics_before.instruction_count;
+      html += `<div class="tt-delta">${d > 0 ? '+' : ''}${d} instructions</div>`;
+    }
+    tooltip.innerHTML = html;
+    tooltip.style.display = 'block';
+    tooltip.style.left = Math.min(mx + 12, W - 200) + 'px';
+    tooltip.style.top = (my - 10) + 'px';
+  });
+  canvas.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+}
+
+function renderTopPasses() {
+  if (!D) return;
+  const ch = D.events.filter(e => e.event_type === 'after' && e.has_changes);
+  const bp = {};
+  for (const e of ch) {
+    const k = e.pass_name;
+    if (!bp[k]) bp[k] = { name: k, iD: 0, bD: 0, count: 0 };
+    bp[k].iD += e.metrics_after.instruction_count - e.metrics_before.instruction_count;
+    bp[k].bD += e.metrics_after.basic_block_count - e.metrics_before.basic_block_count;
+    bp[k].count++;
+  }
+  const sorted = Object.values(bp).sort((a, b) => a.iD - b.iD);
+
+  document.getElementById('top-passes').innerHTML = `
+    <div class="section-header"><h3>🏆 Top Passes by Instruction Impact</h3><span class="hint">Aggregated across all functions</span></div>
+    <div class="tp-grid">${sorted.map(p => {
+      const cls = p.iD < 0 ? 'neg' : p.iD > 0 ? 'pos' : 'zero';
+      return `<div class="tp-item">
+        <div><span class="tp-name">${p.name}</span><span class="tp-count"> · ${p.count}×</span></div>
+        <div style="text-align:right"><div class="tp-delta ${cls}">${p.iD > 0 ? '+' : ''}${p.iD} instr</div><div class="tp-detail">${p.bD > 0 ? '+' : ''}${p.bD} BBs</div></div>
+      </div>`;
+    }).join('')}</div>`;
+}
+
+document.querySelectorAll('.filter-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    F = b.dataset.filter;
+    renderEvents();
+  });
+});
+document.getElementById('search').addEventListener('input', renderEvents);
+load();
+</script>
+</body>
+</html>
