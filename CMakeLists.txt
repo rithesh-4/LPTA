@@ -6,12 +6,21 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ------------------------------------------------------------
-# LLVM 22.1.8 installation
+# LLVM discovery
+# Try LLVM_DIR cmake variable first, then environment variable,
+# then a sensible default path.
 # ------------------------------------------------------------
 
-set(LLVM_DIR
-    "C:/LLVM-full/clang+llvm-22.1.8-x86_64-pc-windows-msvc/lib/cmake/llvm"
-)
+if(NOT DEFINED LLVM_DIR OR LLVM_DIR STREQUAL "")
+    if(DEFINED ENV{LLVM_DIR})
+        set(LLVM_DIR "$ENV{LLVM_DIR}")
+    else()
+        message(FATAL_ERROR
+            "LLVM_DIR not set. Please set it via:\n"
+            "  cmake -DLLVM_DIR=<path-to-llvm-cmake> ...\n"
+            "or set the LLVM_DIR environment variable.")
+    endif()
+endif()
 
 find_package(LLVM REQUIRED CONFIG)
 

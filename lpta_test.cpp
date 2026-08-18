@@ -22,6 +22,11 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <cstdlib>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 using namespace llvm;
 namespace fs = std::filesystem;
@@ -442,6 +447,37 @@ static void saveIRSnapshot(const std::string &suffix, const Any &IR,
 // Codegen Measurement
 // ============================================================
 
+// Discover llc.exe path: check LLVM_DIR env var, then look relative to executable
+static std::string findLlcExe() {
+    // 1. Check LLVM_DIR environment variable
+    if (const char *env = std::getenv("LLVM_DIR")) {
+        std::string candidate = std::string(env) + "/bin/llc.exe";
+        if (fs::exists(candidate)) return candidate;
+    }
+    // 2. Look in same directory as this executable
+    std::string exe_dir;
+    #ifdef _WIN32
+    char buf[MAX_PATH];
+    DWORD len = GetModuleFileNameA(nullptr, buf, MAX_PATH);
+    if (len > 0) exe_dir = fs::path(buf).parent_path().string();
+    #else
+    char buf[4096];
+    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf));
+    if (len > 0) exe_dir = fs::path(std::string(buf, len)).parent_path().string();
+    #endif
+    if (!exe_dir.empty()) {
+        // Try sibling llvm install: ../clang+llvm-.../bin/llc.exe
+        for (auto &entry : fs::directory_iterator(fs::path(exe_dir).parent_path())) {
+            if (entry.is_directory() && entry.path().filename().string().find("clang+llvm") != std::string::npos) {
+                std::string candidate = entry.path().string() + "/bin/llc.exe";
+                if (fs::exists(candidate)) return candidate;
+            }
+        }
+    }
+    // 3. Fallback: just "llc" and hope it's on PATH
+    return "llc";
+}
+
 static unsigned countAsmLines(const std::string &path) {
     std::ifstream f(path);
     std::string line;
@@ -459,6 +495,8 @@ static CodegenResult measureCodegen(const std::string &ir_before_path,
                                     const std::string &ir_after_path,
                                     const std::string &output_dir) {
     CodegenResult result;
+    std::string llc = findLlcExe();
+    errs() << "  Using llc: " << llc << "\n";
 
     // Write a temp batch script to run llc (avoids Windows path issues)
     std::string bat_before = output_dir + "/run_llc_before.bat";
@@ -466,12 +504,12 @@ static CodegenResult measureCodegen(const std::string &ir_before_path,
     {
         std::ofstream b(bat_before);
         b << "@echo off\n";
-        b << "\"C:\\LLVM-full\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\bin\\llc.exe\" -filetype=asm -o \"" << output_dir << "\\codegen_before.s\" \"" << ir_before_path << "\"\n";
+        b << "\"" << llc << "\" -filetype=asm -o \"" << output_dir << "\\codegen_before.s\" \"" << ir_before_path << "\"\n";
     }
     {
         std::ofstream b(bat_after);
         b << "@echo off\n";
-        b << "\"C:\\LLVM-full\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\bin\\llc.exe\" -filetype=asm -o \"" << output_dir << "\\codegen_after.s\" \"" << ir_after_path << "\"\n";
+        b << "\"" << llc << "\" -filetype=asm -o \"" << output_dir << "\\codegen_after.s\" \"" << ir_after_path << "\"\n";
     }
 
     system(bat_before.c_str());
