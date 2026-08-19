@@ -32,7 +32,12 @@ fi
 BUILD_DIR="${BUILD_DIR:-./build}"
 REPORT_DIR="${REPORT_DIR:-./report}"
 INPUT="${1:-./test.ll}"
-SNAPSHOTS="${2:-}"
+SNAPSHOTS=""
+for arg in "$@"; do
+  if [ "$arg" = "--snapshots" ]; then
+    SNAPSHOTS="--snapshots"
+  fi
+done
 
 echo "=== LPTA Build & Run ==="
 echo "  LLVM: $LLVM_DIR"

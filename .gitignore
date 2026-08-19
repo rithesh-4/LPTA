@@ -8,6 +8,7 @@ llvm.tar.xz
 # Generated reports (output from running LPTA)
 report/
 report_real/
+report_test/
 
 # Generated assembly files
 *.s

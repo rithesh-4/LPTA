@@ -23,6 +23,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cstdlib>
+#include <cassert>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -61,6 +62,7 @@ struct IRMetrics {
 static IRMetrics captureModuleMetrics(const Module &M) {
     IRMetrics m;
     for (auto &F : M) {
+        if (F.isDeclaration()) continue;
         m.function_count++;
         for (auto &BB : F) {
             m.basic_block_count++;
@@ -172,7 +174,7 @@ struct PassFrame {
     std::string pass_name;
     IRUnitKind ir_kind = IRUnitKind::Unknown;
     std::string ir_name;
-    unsigned depth;
+    unsigned depth = 0;
     IRMetrics before;
     bool invalidated = false;
     std::string ir_before;  // IR text captured at BEFORE
@@ -185,13 +187,13 @@ static std::vector<PassFrame> pass_stack;
 // ============================================================
 
 struct Event {
-    unsigned id;
+    unsigned id = 0;
     std::string event_type;  // "before", "after", "invalidated"
     std::string pass_name;
     std::string pass_type;   // "adaptor", "pipeline", "transformation", "analysis", "other"
     std::string ir_kind;
     std::string ir_name;
-    unsigned depth;
+    unsigned depth = 0;
     IRMetrics metrics_before;
     IRMetrics metrics_after;
     bool has_changes = false;
@@ -222,16 +224,17 @@ static std::vector<Event> g_events;
 // ============================================================
 
 static std::string classifyPass(StringRef name) {
-    std::string n = name.str();
-    if (n.find("Adaptor") != std::string::npos)
+    if (name.find("Adaptor") != StringRef::npos)
         return "adaptor";
-    if (n.find("PassManager") != std::string::npos)
+    if (name.find("PassManager") != StringRef::npos)
         return "pipeline";
-    if (n.find("ExtraLoopPassManager") != std::string::npos)
+    if (name.find("ExtraLoopPassManager") != StringRef::npos)
         return "pipeline";
-    if (n.find("Analysis") != std::string::npos ||
-        n.find("RequireAnalysis") != std::string::npos ||
-        n.find("InvalidateAnalysis") != std::string::npos)
+    if (name.find("RequireAnalysis") != StringRef::npos)
+        return "analysis";
+    if (name.find("InvalidateAnalysis") != StringRef::npos)
+        return "adaptor";
+    if (name.find("Analysis") != StringRef::npos)
         return "analysis";
     return "transformation";
 }
@@ -494,18 +497,6 @@ static std::string findLlcExe() {
     return "llc";
 }
 
-static unsigned countAsmLines(const std::string &path) {
-    std::ifstream f(path);
-    std::string line;
-    unsigned count = 0;
-    unsigned bytes = 0;
-    while (std::getline(f, line)) {
-        count++;
-        bytes += line.size() + 1;
-    }
-    // Return bytes in upper 16 bits, lines in lower 16 bits
-    return (bytes << 16) | count;
-}
 
 static int runLlc(const std::string &llc, const std::string &input,
                    const std::string &output) {
@@ -538,11 +529,16 @@ static CodegenResult measureCodegen(const std::string &ir_before_path,
     std::string before_asm = output_dir + "/codegen_before.s";
     std::string after_asm = output_dir + "/codegen_after.s";
 
-    runLlc(llc, ir_before_path, before_asm);
-    runLlc(llc, ir_after_path, after_asm);
+    int rc1 = runLlc(llc, ir_before_path, before_asm);
+    int rc2 = runLlc(llc, ir_after_path, after_asm);
 
-    // Count lines
-    {
+    if (rc1 != 0)
+        errs() << "  WARNING: llc failed for before-state (exit code " << rc1 << ")\n";
+    if (rc2 != 0)
+        errs() << "  WARNING: llc failed for after-state (exit code " << rc2 << ")\n";
+
+    // Count lines (only if files exist)
+    if (fs::exists(before_asm)) {
         std::ifstream f(before_asm);
         std::string line;
         while (std::getline(f, line)) {
@@ -550,7 +546,7 @@ static CodegenResult measureCodegen(const std::string &ir_before_path,
             result.asm_size_before += line.size() + 1;
         }
     }
-    {
+    if (fs::exists(after_asm)) {
         std::ifstream f(after_asm);
         std::string line;
         while (std::getline(f, line)) {
@@ -622,7 +618,8 @@ int main(int argc, char **argv) {
             frame.depth = pass_stack.size();
             frame.before = det.metrics;
             frame.invalidated = false;
-            frame.ir_before = serializeIR(IR);
+            std::string ir_text = serializeIR(IR);
+            frame.ir_before = ir_text;
             pass_stack.push_back(std::move(frame));
 
             event_num++;
@@ -637,7 +634,7 @@ int main(int argc, char **argv) {
             ev.ir_name = det.name;
             ev.depth = frame.depth;
             ev.metrics_before = det.metrics;
-            ev.ir_before = serializeIR(IR);
+            ev.ir_before = std::move(ir_text);
             g_events.push_back(ev);
 
             // Console output
@@ -659,6 +656,7 @@ int main(int argc, char **argv) {
 
             PassFrame frame = std::move(pass_stack.back());
             pass_stack.pop_back();
+            assert(frame.pass_name == PassID && "AFTER callback: frame mismatch");
             IRDetection det = detectIR(IR);
             bool changes = hasAnyDelta(frame.before, det.metrics);
 
@@ -713,6 +711,7 @@ int main(int argc, char **argv) {
 
             PassFrame frame = std::move(pass_stack.back());
             pass_stack.pop_back();
+            assert(frame.pass_name == PassID && "INVALIDATED callback: frame mismatch");
             frame.invalidated = true;
 
             event_num++;

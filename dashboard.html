@@ -254,13 +254,14 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans
 </div>
 
 <script>
-let D = null, F = 'all';
+let D = null, F = 'all', eventMap = null;
 
 async function load() {
   try {
     const r = await fetch('history.json');
     if (!r.ok) throw 0;
     D = await r.json();
+    eventMap = null;
     render();
   } catch(e) {
     document.getElementById('events').innerHTML = '<div style="padding:60px;text-align:center;color:var(--text-muted)">Could not load history.json<br><small>Serve with: <code style="background:var(--bg-tertiary);padding:2px 8px;border-radius:4px">python -m http.server 8080</code></small></div>';
@@ -299,7 +300,7 @@ function render() {
       <span class="highlight">${iArrow} IR instructions</span>,
       ${bArrow} basic blocks.
       Final codegen: <span class="highlight">${cgArrow}</span> assembly (${s.codegen_asm_lines_before} → ${s.codegen_asm_lines_after} lines).
-      Stack remained perfectly balanced (0 remaining).
+      ${s.total_invalidated > 0 ? '<span style="color:var(--yellow)">' + s.total_invalidated + ' passes were invalidated (analysis results discarded).</span>' : 'Stack remained perfectly balanced (0 remaining).'}
     </div>`;
 
   renderFuncs();
@@ -373,12 +374,11 @@ function renderEvents() {
       } else d = '<span class="nc">—</span>';
     } else if (e.event_type === 'invalidated') d = '<span class="nc">invalidated</span>';
 
-    const origIdx = D.events.indexOf(e);
-    return `<div class="ev ${rc}" ${canView ? `onclick="openDiff(${origIdx})"` : ''}>
+    return `<div class="ev ${rc}" ${canView ? `onclick="openDiff(${e.id})"` : ''}>
       <span class="eid">${e.id}</span>
       <span><span class="badge ${bc}">${e.event_type.slice(0,3)}</span></span>
-      <span class="pname"><span class="t-${e.pass_type}">${nest}${e.pass_name}</span></span>
-      <span class="iru">${e.ir_kind} ${e.ir_name}</span>
+      <span class="pname"><span class="t-${e.pass_type}">${nest}${esc(e.pass_name)}</span></span>
+      <span class="iru">${e.ir_kind} ${esc(e.ir_name)}</span>
       <span class="dep">${e.depth}</span>
       <span class="dlt">${d}</span>
       <span>${canView ? '<button class="view-btn" title="View IR diff">⊕</button>' : ''}</span>
@@ -387,8 +387,9 @@ function renderEvents() {
   document.getElementById('events').innerHTML = html || '<div style="padding:40px;text-align:center;color:var(--text-muted)">No events match filter</div>';
 }
 
-function openDiff(idx) {
-  const e = D.events[idx];
+function openDiff(eid) {
+  if (!eventMap) eventMap = new Map(D.events.map(e => [e.id, e]));
+  const e = eventMap.get(eid);
   if (!e || !e.ir_before) return;
   document.getElementById('modal-title').innerHTML = `<span class="hl">${e.pass_name}</span> · ${e.ir_kind} ${e.ir_name}`;
 
@@ -511,29 +512,6 @@ function renderChart() {
     ctx.fill();
   }
 
-  // Hover interaction
-  const tooltip = document.getElementById('chart-tooltip');
-  canvas.addEventListener('mousemove', (me) => {
-    const r2 = canvas.getBoundingClientRect();
-    const mx = me.clientX - r2.left;
-    const my = me.clientY - r2.top;
-    // Find nearest event
-    const idx = Math.round(((mx - pad.left) / plotW) * (n - 1));
-    if (idx < 0 || idx >= n) { tooltip.style.display = 'none'; return; }
-    const e = evts[idx];
-    const dx = Math.abs((pad.left + idx * xStep) - mx);
-    if (dx > 15) { tooltip.style.display = 'none'; return; }
-    let html = `<div class="tt-name">${e.pass_name}</div><div class="tt-ir">${e.ir_kind} ${e.ir_name} · depth ${e.depth}</div>`;
-    if (e.event_type === 'after' && e.has_changes) {
-      const d = e.metrics_after.instruction_count - e.metrics_before.instruction_count;
-      html += `<div class="tt-delta">${d > 0 ? '+' : ''}${d} instructions</div>`;
-    }
-    tooltip.innerHTML = html;
-    tooltip.style.display = 'block';
-    tooltip.style.left = Math.min(mx + 12, W - 200) + 'px';
-    tooltip.style.top = (my - 10) + 'px';
-  });
-  canvas.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
 }
 
 function renderTopPasses() {
@@ -569,6 +547,50 @@ document.querySelectorAll('.filter-btn').forEach(b => {
   });
 });
 document.getElementById('search').addEventListener('input', renderEvents);
+
+// Redraw chart on resize
+let resizeTimer;
+const ro = new ResizeObserver(() => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (D) renderChart(); }, 150);
+});
+const chartEl = document.getElementById('chart-section');
+if (chartEl) ro.observe(chartEl);
+
+// Canvas hover interaction (registered once, not per-render)
+(function() {
+  const canvas = document.getElementById('timeline-canvas');
+  const tooltip = document.getElementById('chart-tooltip');
+  if (!canvas || !tooltip) return;
+  canvas.addEventListener('mousemove', (me) => {
+    if (!D) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = me.clientX - rect.left;
+    const my = me.clientY - rect.top;
+    const W = rect.width;
+    const pad = { left: 40, right: 16 };
+    const plotW = W - pad.left - pad.right;
+    const evts = D.events;
+    const n = evts.length;
+    const xStep = plotW / Math.max(n - 1, 1);
+    const idx = Math.round(((mx - pad.left) / plotW) * (n - 1));
+    if (idx < 0 || idx >= n) { tooltip.style.display = 'none'; return; }
+    const e = evts[idx];
+    const dx = Math.abs((pad.left + idx * xStep) - mx);
+    if (dx > 15) { tooltip.style.display = 'none'; return; }
+    let html = `<div class="tt-name">${esc(e.pass_name)}</div><div class="tt-ir">${e.ir_kind} ${esc(e.ir_name)} · depth ${e.depth}</div>`;
+    if (e.event_type === 'after' && e.has_changes) {
+      const d = e.metrics_after.instruction_count - e.metrics_before.instruction_count;
+      html += `<div class="tt-delta">${d > 0 ? '+' : ''}${d} instructions</div>`;
+    }
+    tooltip.innerHTML = html;
+    tooltip.style.display = 'block';
+    tooltip.style.left = Math.min(mx + 12, W - 200) + 'px';
+    tooltip.style.top = (my - 10) + 'px';
+  });
+  canvas.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+})();
+
 load();
 </script>
 </body>

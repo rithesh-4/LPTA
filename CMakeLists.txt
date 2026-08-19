@@ -28,7 +28,7 @@ message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "LLVM_DIR = ${LLVM_DIR}")
 
 # LLVM's required include directories / definitions
-include_directories(${LLVM_INCLUDE_DIRS})
+
 
 separate_arguments(
     LLVM_DEFINITIONS_LIST
@@ -59,6 +59,8 @@ llvm_map_components_to_libnames(
     analysis
     transformutils
 )
+
+target_include_directories(lpta_test PRIVATE ${LLVM_INCLUDE_DIRS})
 
 target_link_libraries(
     lpta_test
