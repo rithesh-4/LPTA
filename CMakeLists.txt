@@ -44,7 +44,14 @@ add_definitions(${LLVM_DEFINITIONS_LIST})
 
 add_executable(
     lpta_test
-    lpta_test.cpp
+    src/main.cpp
+    src/globals.cpp
+    src/Metrics.cpp
+    src/Detection.cpp
+    src/Snapshots.cpp
+    src/Codegen.cpp
+    src/Tracker.cpp
+    src/JsonWriter.cpp
 )
 
 # ------------------------------------------------------------
@@ -54,16 +61,41 @@ add_executable(
 llvm_map_components_to_libnames(
     LLVM_LIBS
     core
+    support
     irreader
     passes
     analysis
     transformutils
+    target
+    codegen
+    x86asmparser
+    x86codegen
+    x86desc
+    x86info
 )
 
-target_include_directories(lpta_test PRIVATE ${LLVM_INCLUDE_DIRS})
+target_include_directories(lpta_test PRIVATE ${LLVM_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/inc)
 
 target_link_libraries(
     lpta_test
     PRIVATE
     ${LLVM_LIBS}
 )
+
+# ------------------------------------------------------------
+# Unit test executable
+# ------------------------------------------------------------
+
+add_executable(
+    test_utilities
+    tests/test_utilities.cpp
+    src/globals.cpp
+    src/Metrics.cpp
+    src/Detection.cpp
+    src/Tracker.cpp
+    src/JsonWriter.cpp
+    src/Snapshots.cpp
+)
+
+target_include_directories(test_utilities PRIVATE ${LLVM_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/inc)
+target_link_libraries(test_utilities PRIVATE ${LLVM_LIBS})

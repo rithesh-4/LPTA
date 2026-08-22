@@ -22,8 +22,17 @@ run_llc_*.bat
 ir_before_opt.ll
 ir_after_opt.ll
 
+# Generated test outputs
+tests/edge_cases/results/
+tests/judge_demo/demo_output/
+tests/judge_demo/output/
+tests/correctness_report.txt
+tests/test_report.txt
+tests/fuzz_results.log
+
 # IDE / editor
 .vscode/
+.obsidian/
 .idea/
 *.swp
 *.swo

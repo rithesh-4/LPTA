@@ -1,0 +1,396 @@
+// ============================================================
+// LPTA Standalone Unit Tests
+//
+// Tests for utility functions that don't require the full LLVM
+// pass pipeline.
+// ============================================================
+
+#include <cassert>
+#include <climits>
+#include <cstdio>
+#include <sstream>
+#include <string>
+
+#include "Metrics.h"
+#include "Tracker.h"
+#include "JsonWriter.h"
+#include "Snapshots.h"
+#include "Detection.h"
+
+static int g_pass = 0, g_fail = 0;
+
+#define CHECK(expr, msg) do { \
+    if (expr) { g_pass++; printf("  [PASS] %s\n", msg); } \
+    else      { g_fail++; printf("  [FAIL] %s  (%s:%d)\n", msg, __FILE__, __LINE__); } \
+} while(0)
+
+#define CHECK_EQ(a, b, msg) do { \
+    auto _av = (a); auto _bv = (b); \
+    if (_av == _bv) { g_pass++; printf("  [PASS] %s\n", msg); } \
+    else { g_fail++; printf("  [FAIL] %s  (got %s vs %s)  (%s:%d)\n", \
+           msg, #a, #b, __FILE__, __LINE__); } \
+} while(0)
+
+// ============================================================
+// IRMetrics
+// ============================================================
+void test_metrics_zero_init() {
+    IRMetrics m;
+    CHECK(m.instruction_count == 0 && m.basic_block_count == 0 &&
+          m.function_count == 0 && m.global_count == 0 &&
+          m.call_count == 0 && m.load_count == 0 &&
+          m.store_count == 0 && m.branch_count == 0 &&
+          m.phi_count == 0 && m.return_count == 0,
+          "IRMetrics: all fields zero-initialized");
+}
+
+void test_hasAnyDelta_same() {
+    IRMetrics a, b;
+    CHECK(!hasAnyDelta(a, b), "hasAnyDelta: identical -> false");
+}
+
+void test_hasAnyDelta_instr() {
+    IRMetrics a, b;
+    a.instruction_count = 10;
+    b.instruction_count = 20;
+    CHECK(hasAnyDelta(a, b), "hasAnyDelta: instruction_count differs -> true");
+}
+
+void test_hasAnyDelta_return() {
+    IRMetrics a, b;
+    a.return_count = 1;
+    b.return_count = 2;
+    CHECK(hasAnyDelta(a, b), "hasAnyDelta: return_count differs -> true");
+}
+
+void test_hasAnyDelta_extreme() {
+    IRMetrics a, b;
+    a.instruction_count = 0;
+    b.instruction_count = UINT32_MAX;
+    CHECK(hasAnyDelta(a, b), "hasAnyDelta: 0 vs UINT32_MAX -> true");
+}
+
+void test_hasAnyDelta_same_extreme() {
+    IRMetrics a, b;
+    a.instruction_count = UINT32_MAX;
+    b.instruction_count = UINT32_MAX;
+    CHECK(!hasAnyDelta(a, b), "hasAnyDelta: both UINT32_MAX -> false");
+}
+
+// ============================================================
+// jsonEscape
+// ============================================================
+void test_jsonEscape_empty() {
+    CHECK(jsonEscape("").empty(), "jsonEscape: empty string");
+}
+
+void test_jsonEscape_plain() {
+    CHECK(jsonEscape("hello") == "hello", "jsonEscape: plain text unchanged");
+}
+
+void test_jsonEscape_quotes() {
+    CHECK(jsonEscape("say \"hi\"") == "say \\\"hi\\\"", "jsonEscape: double quotes");
+}
+
+void test_jsonEscape_backslash() {
+    CHECK(jsonEscape("a\\b") == "a\\\\b", "jsonEscape: backslash");
+}
+
+void test_jsonEscape_newline() {
+    CHECK(jsonEscape("a\nb") == "a\\nb", "jsonEscape: newline");
+}
+
+void test_jsonEscape_tab() {
+    CHECK(jsonEscape("a\tb") == "a\\tb", "jsonEscape: tab");
+}
+
+void test_jsonEscape_slash() {
+    CHECK(jsonEscape("a/b") == "a\\/b", "jsonEscape: forward slash");
+}
+
+void test_jsonEscape_control() {
+    CHECK(jsonEscape(std::string(1, '\x01')) == "\\u0001",
+          "jsonEscape: control char -> \\u0001");
+}
+
+void test_jsonEscape_backspace() {
+    CHECK(jsonEscape("a\bc") == "a\\bc", "jsonEscape: backspace");
+}
+
+void test_jsonEscape_formfeed() {
+    CHECK(jsonEscape("a\fc") == "a\\fc", "jsonEscape: formfeed");
+}
+
+void test_jsonEscape_cr() {
+    CHECK(jsonEscape("a\rc") == "a\\rc", "jsonEscape: carriage return");
+}
+
+void test_jsonEscape_null() {
+    CHECK(jsonEscape(std::string("a\0b", 3)).find("\\u0000") != std::string::npos,
+          "jsonEscape: null byte -> \\u0000");
+}
+
+void test_jsonEscape_unicode_passthrough() {
+    std::string cafe = "caf\xc3\xa9";
+    CHECK(jsonEscape(cafe) == cafe, "jsonEscape: UTF-8 passes through");
+}
+
+void test_jsonEscape_long() {
+    std::string s(500, 'x');
+    s[250] = '"';
+    std::string r = jsonEscape(s);
+    CHECK(r.size() > s.size() && r.find("\\\"") != std::string::npos,
+          "jsonEscape: long string with embedded quote");
+}
+
+// ============================================================
+// classifyPass
+// ============================================================
+void test_classify_adaptor() {
+    CHECK(classifyPass("AdaptorPass") == "adaptor", "classifyPass: Adaptor -> adaptor");
+}
+
+void test_classify_pipeline() {
+    CHECK(classifyPass("PassManager") == "pipeline", "classifyPass: PassManager -> pipeline");
+}
+
+void test_classify_extra_pm() {
+    CHECK(classifyPass("ExtraLoopPassManager") == "pipeline",
+          "classifyPass: ExtraLoopPassManager -> pipeline");
+}
+
+void test_classify_analysis() {
+    CHECK(classifyPass("LoopInfoAnalysis") == "analysis",
+          "classifyPass: LoopInfoAnalysis -> analysis");
+}
+
+void test_classify_require() {
+    CHECK(classifyPass("RequireAnalysis<LoopInfo>") == "analysis",
+          "classifyPass: RequireAnalysis -> analysis");
+}
+
+void test_classify_invalidate() {
+    CHECK(classifyPass("InvalidateAnalysis<LoopPass>") == "adaptor",
+          "classifyPass: InvalidateAnalysis -> adaptor (priority over analysis)");
+}
+
+void test_classify_transform() {
+    CHECK(classifyPass("InstCombinePass") == "transformation",
+          "classifyPass: InstCombinePass -> transformation");
+}
+
+void test_classify_simplify() {
+    CHECK(classifyPass("SimplifyCFGPass") == "transformation",
+          "classifyPass: SimplifyCFGPass -> transformation");
+}
+
+void test_classify_empty() {
+    CHECK(classifyPass("") == "transformation",
+          "classifyPass: empty -> transformation");
+}
+
+// ============================================================
+// irUnitKindName
+// ============================================================
+void test_kind_names() {
+    CHECK(std::string(irUnitKindName(IRUnitKind::Module)) == "Module",
+          "irUnitKindName: Module");
+    CHECK(std::string(irUnitKindName(IRUnitKind::Function)) == "Function",
+          "irUnitKindName: Function");
+    CHECK(std::string(irUnitKindName(IRUnitKind::Loop)) == "Loop",
+          "irUnitKindName: Loop");
+    CHECK(std::string(irUnitKindName(IRUnitKind::Unknown)) == "Unknown",
+          "irUnitKindName: Unknown");
+}
+
+// ============================================================
+// sanitizeFilename
+// ============================================================
+void test_sanitize_normal() {
+    CHECK(sanitizeFilename("hello_world") == "hello_world",
+          "sanitizeFilename: normal name unchanged");
+}
+
+void test_sanitize_special() {
+    CHECK(sanitizeFilename("a/b:c d") == "a_b_c_d",
+          "sanitizeFilename: special chars replaced");
+}
+
+void test_sanitize_empty() {
+    CHECK(sanitizeFilename("") == "unnamed",
+          "sanitizeFilename: empty -> unnamed");
+}
+
+void test_sanitize_dots() {
+    CHECK(sanitizeFilename("file.ll") == "file.ll",
+          "sanitizeFilename: dots preserved");
+}
+
+void test_sanitize_angle() {
+    std::string r = sanitizeFilename("T<int>");
+    CHECK(r.find('<') == std::string::npos && r.find('>') == std::string::npos,
+          "sanitizeFilename: angle brackets replaced");
+}
+
+// ============================================================
+// shouldSnapshot
+// ============================================================
+void test_snapshot_default_off() {
+    CHECK(!shouldSnapshot("InstCombinePass"),
+          "shouldSnapshot: defaults to off even for allowed pass");
+}
+
+// ============================================================
+// g_snapshot_allowlist
+// ============================================================
+void test_allowlist_contents() {
+    CHECK(g_snapshot_allowlist.count("InstCombinePass") &&
+          g_snapshot_allowlist.count("SimplifyCFGPass") &&
+          g_snapshot_allowlist.count("GVNPass") &&
+          g_snapshot_allowlist.count("LICMPass") &&
+          g_snapshot_allowlist.count("LoopUnrollPass") &&
+          g_snapshot_allowlist.count("InlinerPass"),
+          "g_snapshot_allowlist: contains expected passes");
+}
+
+void test_allowlist_exclusion() {
+    CHECK(!g_snapshot_allowlist.count("NonExistentPass"),
+          "g_snapshot_allowlist: does not contain random pass");
+}
+
+// ============================================================
+// CodegenResult defaults
+// ============================================================
+void test_codegen_defaults() {
+    CodegenResult cr;
+    CHECK(cr.asm_lines_before == 0 && cr.asm_lines_after == 0 &&
+          cr.asm_size_before == 0 && cr.asm_size_after == 0,
+          "CodegenResult: all fields zero-initialized");
+}
+
+// ============================================================
+// printDeltaLine (crash test)
+// ============================================================
+void test_delta_no_change() {
+    printDeltaLine("test", 10, 10);
+    CHECK(true, "printDeltaLine: no change -> no crash");
+}
+
+void test_delta_large() {
+    unsigned big = 3000000000u;
+    printDeltaLine("test", big, big - 100);
+    CHECK(true, "printDeltaLine: large values (previously overflowed) -> no crash");
+}
+
+void test_delta_max() {
+    printDeltaLine("test", UINT32_MAX, UINT32_MAX - 1);
+    CHECK(true, "printDeltaLine: near-max unsigned -> no crash");
+}
+
+// ============================================================
+// Struct defaults
+// ============================================================
+void test_event_init() {
+    Event e;
+    CHECK(e.id == 0 && e.event_type.empty() && e.pass_name.empty() &&
+          e.depth == 0 && !e.has_changes && e.ir_before.empty(),
+          "Event: default initialization correct");
+}
+
+void test_passframe_init() {
+    PassFrame f;
+    CHECK(f.ir_ptr == nullptr && f.ir_kind == IRUnitKind::Unknown &&
+          f.depth == 0 && !f.invalidated && f.event_id == 0,
+          "PassFrame: default initialization correct");
+}
+
+// ============================================================
+// writeMetricsJSON
+// ============================================================
+void test_metrics_json_format() {
+    IRMetrics m;
+    m.instruction_count = 42;
+    m.return_count = 2;
+    std::ostringstream oss;
+    writeMetricsJSON(oss, m, "  ");
+    std::string j = oss.str();
+    CHECK(j.find("\"instruction_count\": 42") != std::string::npos &&
+          j.find("\"return_count\": 2") != std::string::npos,
+          "writeMetricsJSON: correct JSON field output");
+}
+
+// ============================================================
+// Main
+// ============================================================
+int main() {
+    printf("=== LPTA Unit Tests ===\n\n");
+
+    printf("IRMetrics:\n");
+    test_metrics_zero_init();
+    test_hasAnyDelta_same();
+    test_hasAnyDelta_instr();
+    test_hasAnyDelta_return();
+    test_hasAnyDelta_extreme();
+    test_hasAnyDelta_same_extreme();
+
+    printf("\njsonEscape:\n");
+    test_jsonEscape_empty();
+    test_jsonEscape_plain();
+    test_jsonEscape_quotes();
+    test_jsonEscape_backslash();
+    test_jsonEscape_newline();
+    test_jsonEscape_tab();
+    test_jsonEscape_slash();
+    test_jsonEscape_control();
+    test_jsonEscape_backspace();
+    test_jsonEscape_formfeed();
+    test_jsonEscape_cr();
+    test_jsonEscape_null();
+    test_jsonEscape_unicode_passthrough();
+    test_jsonEscape_long();
+
+    printf("\nclassifyPass:\n");
+    test_classify_adaptor();
+    test_classify_pipeline();
+    test_classify_extra_pm();
+    test_classify_analysis();
+    test_classify_require();
+    test_classify_invalidate();
+    test_classify_transform();
+    test_classify_simplify();
+    test_classify_empty();
+
+    printf("\nirUnitKindName:\n");
+    test_kind_names();
+
+    printf("\nsanitizeFilename:\n");
+    test_sanitize_normal();
+    test_sanitize_special();
+    test_sanitize_empty();
+    test_sanitize_dots();
+    test_sanitize_angle();
+
+    printf("\nshouldSnapshot / allowlist:\n");
+    test_snapshot_default_off();
+    test_allowlist_contents();
+    test_allowlist_exclusion();
+
+    printf("\nCodegenResult:\n");
+    test_codegen_defaults();
+
+    printf("\nprintDeltaLine (crash / overflow):\n");
+    test_delta_no_change();
+    test_delta_large();
+    test_delta_max();
+
+    printf("\nStruct defaults:\n");
+    test_event_init();
+    test_passframe_init();
+
+    printf("\nwriteMetricsJSON:\n");
+    test_metrics_json_format();
+
+    printf("\n=== Results: %d passed, %d failed (out of %d) ===\n",
+           g_pass, g_fail, g_pass + g_fail);
+    return g_fail > 0 ? 1 : 0;
+}

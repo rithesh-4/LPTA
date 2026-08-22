@@ -119,15 +119,15 @@ Aggregated view showing which pass types had the most effect.
 ## Architecture
 
 ```
-lpta_test.cpp          ← Single-file C++ implementation
-  ├── IRMetrics        ← 10 structural counters (instructions, BBs, calls, etc.)
-  ├── IRDetection      ← Detects IR unit type from Any (Module/Function/Loop)
-  ├── PassFrame stack  ← Tracks nested pass execution correctly
-  ├── Event struct     ← Records every pass event with metrics + IR text
-  ├── PassClassifier   ← Distinguishes adaptors from transformations
-  ├── CodegenMeasurement ← Uses llc to measure assembly size
-  ├── JSON serialization ← Writes structured history.json
-  └── CLI parsing      ← Supports -O0..-Oz, --snapshots, output dir
+inc/ + src/             ← Modular C++ implementation
+  Config.h              ← Shared globals (output dir, opt level, snapshots flag)
+  Metrics.h/.cpp        ← 10 structural counters (instructions, BBs, calls, etc.)
+  Detection.h/.cpp      ← Detects IR unit type from Any (Module/Function/Loop)
+  Tracker.h/.cpp        ← PassFrame stack + Event records; tracks nested pass execution
+  Snapshots.h/.cpp      ← Selective IR snapshot saving for changed passes
+  Codegen.h/.cpp        ← Uses llc to measure assembly size
+  JsonWriter.h/.cpp     ← Writes structured history.json
+  main.cpp              ← CLI parsing (-O0..-Oz, --snapshots) + pipeline wiring
 
 dashboard.html         ← Self-contained HTML/CSS/JS dashboard
   ├── Summary cards
@@ -157,7 +157,7 @@ Object size measurement uses `llc` to compile before/after IR to assembly, then 
 
 | File | Purpose |
 |------|---------|
-| `lpta_test.cpp` | Main implementation (~790 lines) |
+| `inc/`, `src/` | Modular C++ implementation (see Architecture above) |
 | `dashboard.html` | Interactive HTML dashboard |
 | `CMakeLists.txt` | Build configuration |
 | `run_lpta.sh` | One-command build + run script |
@@ -181,6 +181,52 @@ real_test.ll with -O2:
     EarlyCSEPass:     -42 instructions (9x)
     SimplifyCFGPass:  -28 instructions (12x)
     InstCombinePass:  -18 instructions (8x)
+```
+
+## How to Prove Correctness
+
+The most common question: **"How do you know the numbers are right?"** LPTA provides a 7-layer validation strategy:
+
+### 1. Hand-Countable Ground Truth
+
+`tests/tiny_proof.ll` is a tiny IR file (2 functions, 12 instructions) where every element can be counted by hand. Run:
+
+```bash
+bash tests/judge_proof.sh build/
+```
+
+This produces a side-by-side comparison of LPTA's metrics against manually verified ground truth.
+
+### 2. Independent IR Parsing
+
+`tests/validate_correctness.sh` uses `grep` to count IR elements independently (separate from LPTA's C++ counting code), then compares against LPTA's output:
+
+```bash
+bash tests/validate_correctness.sh build/ test.ll
+```
+
+### 3. LLVM Cross-Validation
+
+If `opt` is available, the validation script compares LPTA's metrics against LLVM's own `opt -stats` output — two independent counting implementations.
+
+### 4. Determinism
+
+Running LPTA twice on the same input produces byte-identical `history.json` output.
+
+### 5. Formal Invariants
+
+The C++ source code contains `assert()` statements that verify counting invariants at runtime (e.g., `instruction_count >= call_count + load_count + store_count`).
+
+### 6. Unit Tests
+
+48 unit tests (`tests/test_utilities.cpp`) verify utility functions, delta calculations, JSON escaping, pass classification, and edge cases.
+
+### 7. Fuzz Testing
+
+300+ mutated inputs (`tests/fuzz_runner.sh`) verify LPTA never crashes, hangs, or produces corrupt output.
+
+```bash
+bash tests/run_all_tests.sh build/   # Run full test suite
 ```
 
 ## License
