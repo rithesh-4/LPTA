@@ -133,11 +133,12 @@ void writeHistoryJSON(const std::string &filename, const CodegenResult &cg) {
     f << "    \"total_invalidated\": " << invalidated_count << ",\n";
     f << "    \"passes_with_changes\": " << passes_with_changes << ",\n";
     f << "    \"unique_pass_names\": " << unique_passes.size() << ",\n";
-    // Pipeline summary: total instruction reduction
+    // Pipeline summary: total instruction reduction. Keys are ALWAYS emitted
+    // (zeros when unavailable) so the schema is stable even for runs that
+    // produced no events (e.g. empty input modules).
+    IRMetrics first_mod, last_mod;
+    bool found_first = false, found_last = false;
     if (!g_events.empty()) {
-        IRMetrics first_mod, last_mod;
-        bool found_first = false, found_last = false;
-
         // 1. Prefer first Module-level event for initial state
         for (auto &e : g_events) {
             if (e.ir_kind == "Module") {
@@ -146,7 +147,7 @@ void writeHistoryJSON(const std::string &filename, const CodegenResult &cg) {
                 break;
             }
         }
-        if (!found_first && !g_events.empty()) {
+        if (!found_first) {
             first_mod = g_events.front().metrics_before;
             found_first = true;
         }
@@ -159,7 +160,7 @@ void writeHistoryJSON(const std::string &filename, const CodegenResult &cg) {
                 break;
             }
         }
-        if (!found_last && !g_events.empty()) {
+        if (!found_last) {
             for (auto it = g_events.rbegin(); it != g_events.rend(); ++it) {
                 if (it->event_type == "after") {
                     last_mod = it->metrics_after;
@@ -168,18 +169,17 @@ void writeHistoryJSON(const std::string &filename, const CodegenResult &cg) {
                 }
             }
         }
-
-        if (found_first && found_last) {
-            f << "    \"total_instructions_before\": " << first_mod.instruction_count << ",\n";
-            f << "    \"total_instructions_after\": " << last_mod.instruction_count << ",\n";
-            f << "    \"total_bbs_before\": " << first_mod.basic_block_count << ",\n";
-            f << "    \"total_bbs_after\": " << last_mod.basic_block_count << ",\n";
-        } else {
-            f << "    \"total_instructions_before\": 0,\n";
-            f << "    \"total_instructions_after\": 0,\n";
-            f << "    \"total_bbs_before\": 0,\n";
-            f << "    \"total_bbs_after\": 0,\n";
-        }
+    }
+    if (found_first && found_last) {
+        f << "    \"total_instructions_before\": " << first_mod.instruction_count << ",\n";
+        f << "    \"total_instructions_after\": " << last_mod.instruction_count << ",\n";
+        f << "    \"total_bbs_before\": " << first_mod.basic_block_count << ",\n";
+        f << "    \"total_bbs_after\": " << last_mod.basic_block_count << ",\n";
+    } else {
+        f << "    \"total_instructions_before\": 0,\n";
+        f << "    \"total_instructions_after\": 0,\n";
+        f << "    \"total_bbs_before\": 0,\n";
+        f << "    \"total_bbs_after\": 0,\n";
     }
     // Codegen data
     f << "    \"codegen_asm_lines_before\": " << cg.asm_lines_before << ",\n";

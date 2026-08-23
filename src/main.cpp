@@ -83,6 +83,10 @@ int main(int argc, char **argv) {
         } else if (!output_dir_set) {
             g_output_dir = arg;
             output_dir_set = true;
+        } else {
+            errs() << "ERROR: unexpected argument '" << arg << "'\n";
+            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots]\n";
+            return 1;
         }
     }
 
@@ -241,14 +245,21 @@ int main(int argc, char **argv) {
             ev.metrics_after = det.metrics;
             ev.has_changes = changes;
             ev.ir_before = std::move(frame.ir_before);
-            // Cap AFTER snapshot size too to match the BEFORE cap.
+            // Snapshot size cap is decided jointly for the pair: keep
+            // before/after only if BOTH sides fit under the cap, so the
+            // dashboard never renders a one-sided diff.
             {
+                static constexpr size_t kMaxSnapshotBytes = 4 * 1024 * 1024;
                 std::string afterSnap;
                 if (changes && shouldSnapshot(PassID))
                     afterSnap = serializeIR(IR);
-                static constexpr size_t kMaxSnapshotBytes = 4 * 1024 * 1024;
-                ev.ir_after = (afterSnap.size() <= kMaxSnapshotBytes)
-                                 ? std::move(afterSnap) : std::string();
+                bool both_fit = ev.ir_before.size() <= kMaxSnapshotBytes &&
+                                afterSnap.size() <= kMaxSnapshotBytes;
+                if (!both_fit) {
+                    ev.ir_before.clear();
+                    afterSnap.clear();
+                }
+                ev.ir_after = std::move(afterSnap);
             }
             g_events.push_back(ev);
 

@@ -1,4 +1,4 @@
-#pragma once
+#pragma once //This tell the compiler to include this header file only once.
 
 #include <string>
 #include <vector>

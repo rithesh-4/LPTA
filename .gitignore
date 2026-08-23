@@ -30,6 +30,9 @@ tests/correctness_report.txt
 tests/test_report.txt
 tests/fuzz_results.log
 
+# Generated Doxygen output (sources in docs/ are tracked)
+docs/doxygen/
+
 # IDE / editor
 .vscode/
 .obsidian/
@@ -37,6 +40,12 @@ tests/fuzz_results.log
 *.swp
 *.swo
 *~
+
+# Personal / session-local files (never publish)
+AGENTS.md
+AMD_Prep_*.md
+*Prep*.md
+*prep*.md
 
 # OS
 .DS_Store

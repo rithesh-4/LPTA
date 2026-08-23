@@ -55,7 +55,10 @@ IRMetrics captureFunctionMetrics(const Function &F) {
         for (auto &I : BB) {
             m.instruction_count++;
             switch (I.getOpcode()) {
-            case Instruction::Call: m.call_count++; break;
+            case Instruction::Call:
+            case Instruction::Invoke:
+            case Instruction::CallBr:
+                m.call_count++; break;
             case Instruction::Load: m.load_count++; break;
             case Instruction::Store: m.store_count++; break;
             case Instruction::Br: m.branch_count++; break;
@@ -75,7 +78,10 @@ IRMetrics captureLoopMetrics(const Loop &L) {
         for (auto &I : *BB) {
             m.instruction_count++;
             switch (I.getOpcode()) {
-            case Instruction::Call: m.call_count++; break;
+            case Instruction::Call:
+            case Instruction::Invoke:
+            case Instruction::CallBr:
+                m.call_count++; break;
             case Instruction::Load: m.load_count++; break;
             case Instruction::Store: m.store_count++; break;
             case Instruction::Br: m.branch_count++; break;

@@ -8,6 +8,9 @@
 #include <cassert>
 #include <climits>
 #include <cstdio>
+#include <fstream>
+#include <iterator>
+#include <memory>
 #include <sstream>
 #include <string>
 
@@ -16,6 +19,12 @@
 #include "JsonWriter.h"
 #include "Snapshots.h"
 #include "Detection.h"
+
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Function.h"
+#include "llvm/AsmParser/Parser.h"
+#include "llvm/Support/SourceMgr.h"
 
 static int g_pass = 0, g_fail = 0;
 
@@ -320,6 +329,103 @@ void test_metrics_json_format() {
 }
 
 // ============================================================
+// captureFunctionMetrics / captureModuleMetrics (real IR)
+// ============================================================
+
+static std::unique_ptr<llvm::Module>
+parseTestIR(llvm::LLVMContext &Ctx, const char *IR) {
+    llvm::SMDiagnostic Err;
+    return llvm::parseAssemblyString(IR, Err, Ctx);
+}
+
+static const char kInvokeIR[] = R"ir(
+    declare void @f()
+    declare i32 @__gxx_personality_v0(...)
+
+    define i32 @with_invoke() personality ptr @__gxx_personality_v0 {
+    entry:
+      invoke void @f() to label %cont unwind label %lpad
+    cont:
+      ret i32 0
+    lpad:
+      %e = landingpad { ptr, i32 } cleanup
+      resume { ptr, i32 } %e
+    }
+)ir";
+
+static const char kCallbrIR[] = R"ir(
+    define void @with_callbr() {
+    entry:
+      callbr void asm "", "r,!i"(i32 0)
+              to label %normal [label %other]
+    normal:
+      ret void
+    other:
+      ret void
+    }
+)ir";
+
+void test_invoke_function_metrics() {
+    llvm::LLVMContext Ctx;
+    auto M = parseTestIR(Ctx, kInvokeIR);
+    CHECK(M != nullptr, "parseTestIR: invoke IR parses");
+    if (!M) return;
+    IRMetrics m = captureFunctionMetrics(*M->getFunction("with_invoke"));
+    CHECK_EQ(m.call_count, 1u,
+             "captureFunctionMetrics: invoke counted as call");
+    CHECK_EQ(m.instruction_count, 4u,
+             "captureFunctionMetrics: invoke instruction_count");
+}
+
+void test_callbr_function_metrics() {
+    llvm::LLVMContext Ctx;
+    auto M = parseTestIR(Ctx, kCallbrIR);
+    CHECK(M != nullptr, "parseTestIR: callbr IR parses");
+    if (!M) return;
+    IRMetrics m = captureFunctionMetrics(*M->getFunction("with_callbr"));
+    CHECK_EQ(m.call_count, 1u,
+             "captureFunctionMetrics: callbr counted as call");
+}
+
+void test_module_function_call_agreement() {
+    llvm::LLVMContext Ctx;
+    auto M = parseTestIR(Ctx, kInvokeIR);
+    CHECK(M != nullptr, "parseTestIR: agreement IR parses");
+    if (!M) return;
+    unsigned fn_calls = 0, fn_instrs = 0;
+    for (const llvm::Function &F : *M) {
+        if (F.isDeclaration()) continue;
+        IRMetrics m = captureFunctionMetrics(F);
+        fn_calls += m.call_count;
+        fn_instrs += m.instruction_count;
+    }
+    IRMetrics mod = captureModuleMetrics(*M);
+    CHECK_EQ(mod.call_count, fn_calls,
+             "module vs function metrics: call counts agree");
+    CHECK_EQ(mod.instruction_count, fn_instrs,
+             "module vs function metrics: instruction counts agree");
+}
+
+// ============================================================
+// writeHistoryJSON schema stability
+// ============================================================
+
+void test_history_json_empty_events_schema() {
+    g_events.clear();
+    const char *fn = "test_history_empty_tmp.json";
+    writeHistoryJSON(fn);
+    std::ifstream f(fn);
+    std::string content((std::istreambuf_iterator<char>(f)),
+                        std::istreambuf_iterator<char>());
+    std::remove(fn);
+    CHECK(content.find("\"total_instructions_before\": 0") != std::string::npos &&
+          content.find("\"total_instructions_after\": 0") != std::string::npos &&
+          content.find("\"total_bbs_before\": 0") != std::string::npos &&
+          content.find("\"total_bbs_after\": 0") != std::string::npos,
+          "writeHistoryJSON: zero-event run still emits total_* summary keys");
+}
+
+// ============================================================
 // Main
 // ============================================================
 int main() {
@@ -389,6 +495,14 @@ int main() {
 
     printf("\nwriteMetricsJSON:\n");
     test_metrics_json_format();
+
+    printf("\ncaptureFunctionMetrics (real IR):\n");
+    test_invoke_function_metrics();
+    test_callbr_function_metrics();
+    test_module_function_call_agreement();
+
+    printf("\nwriteHistoryJSON schema:\n");
+    test_history_json_empty_events_schema();
 
     printf("\n=== Results: %d passed, %d failed (out of %d) ===\n",
            g_pass, g_fail, g_pass + g_fail);

@@ -1,4 +1,4 @@
-#pragma once
+#pragma once //Tells the compiler to include this header only once
 
 #include <string>
 
