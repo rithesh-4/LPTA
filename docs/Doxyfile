@@ -1,0 +1,69 @@
+# Doxyfile for LPTA — LLVM Pass Transformation Analysis
+#
+# Generate with (from the repo root):
+#   doxygen docs/Doxyfile
+# Output: docs/doxygen/html/index.html  (open in any browser)
+
+# ---- Project ---------------------------------------------------------------
+DOXYFILE_ENCODING      = UTF-8
+PROJECT_NAME           = "LPTA"
+PROJECT_NUMBER         = 1.0
+PROJECT_BRIEF          = "LLVM Pass Transformation Analysis - see what every optimization pass actually does"
+PROJECT_LOGO           =
+TAB_SIZE               = 4
+OPTIMIZE_OUTPUT_FOR_C  = NO
+
+# ---- Input -----------------------------------------------------------------
+# Paths are relative to the REPO ROOT (run:  doxygen docs/Doxyfile )
+INPUT                  = src inc tests/test_utilities.cpp docs/mainpage.dox docs/architecture
+RECURSIVE              = NO
+EXCLUDE_PATTERNS       = */build/* */report*/*
+FILE_PATTERNS          = *.cpp *.h *.md *.dox
+USE_MDFILE_AS_MAINPAGE = docs/mainpage.dox
+
+# Run from repo root so this strips correctly
+STRIP_FROM_PATH        = .
+STRIP_FROM_INC_PATH    =
+
+# ---- Extraction ------------------------------------------------------------
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+HIDE_UNDOC_MEMBERS     = NO
+
+# ---- HTML output -----------------------------------------------------------
+OUTPUT_DIRECTORY       = docs/doxygen
+HTML_OUTPUT            = html
+GENERATE_HTML          = YES
+SEARCHENGINE           = YES
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+
+# ---- Diagrams (Graphviz) ---------------------------------------------------
+HAVE_DOT               = YES
+DOT_NUM_THREADS        = 0
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+DIRECTORY_GRAPH        = YES
+GRAPHICAL_HIERARCHY    = YES
+MAX_DOT_GRAPH_DEPTH    = 5
+DOT_GRAPH_MAX_NODES    = 200
+DOT_CLEANUP            = YES
+
+# ---- Browsing --------------------------------------------------------------
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+SHOW_INCLUDE_FILES     = YES
+SHOW_FILES             = YES
+SORT_MEMBER_DOCS       = NO
+
+# ---- Noise control ---------------------------------------------------------
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+GENERATE_LATEX         = NO

@@ -118,6 +118,10 @@ Aggregated view showing which pass types had the most effect.
 
 ## Architecture
 
+> **Visual walkthrough:** see [docs/architecture/DATA_FLOW.md](docs/architecture/DATA_FLOW.md) —
+> Mermaid diagrams of the end-to-end pipeline, one pass execution (why tracking uses a stack),
+> and a file-level call map. Annotated repository map: [docs/architecture/PROJECT_MAP.md](docs/architecture/PROJECT_MAP.md).
+
 ```
 inc/ + src/             ← Modular C++ implementation
   Config.h              ← Shared globals (output dir, opt level, snapshots flag)
@@ -161,6 +165,7 @@ Object size measurement uses `llc` to compile before/after IR to assembly, then 
 | `dashboard.html` | Interactive HTML dashboard |
 | `CMakeLists.txt` | Build configuration |
 | `run_lpta.sh` | One-command build + run script |
+| `docs/` | Visual documentation: Mermaid architecture diagrams (`docs/architecture/`), annotated project map, Doxygen API docs (regenerate: `doxygen docs/Doxyfile`) |
 | `test.ll` | Simple test input (5 functions) |
 | `real_test.c` | Realistic test input (9 functions) |
 | `real_test.ll` | Compiled from real_test.c |

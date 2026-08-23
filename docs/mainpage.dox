@@ -1,0 +1,54 @@
+/**
+@mainpage LPTA — LLVM Pass Transformation Analysis
+
+@section about What this tool is
+
+LPTA runs LLVM's optimization pipeline on an IR file (.ll) while
+instrumenting every pass via PassInstrumentationCallbacks. For each pass
+execution it records the state of the IR before and after, computes
+structural deltas (instructions, blocks, calls, branches, ...), optionally
+saves IR snapshots for passes that changed something, measures codegen size
+with llc, and emits history.json — visualized by an interactive dashboard.
+
+@section pipeline The data pipeline at a glance
+
+@verbatim
+  input.ll ──parseIRFile──▶ Module
+                               │
+              PassBuilder + PassInstrumentationCallbacks
+                               │
+      BEFORE callback ──push──▶ PassFrame stack          g_events ◀── push
+                               │                             │
+                           pass runs                         │
+                               │                             │
+      AFTER / INVALIDATED ─pop─┘                    writeHistoryJSON()
+                                                             │
+  ir_before_opt.ll / ir_after_opt.ll ──llc──▶ asm sizes   history.json
+                                                             │
+                                              python -m http.server
+                                                             │
+                                                      Dashboard (fetch)
+@endverbatim
+
+@section docs More documentation
+
+- @subpage arch_data_flow — runtime data-flow diagrams (Mermaid source in docs/architecture/)
+- @subpage arch_project_map — annotated repository map
+
+@section layers Proving the numbers right (7 layers)
+
+1. Hand-countable ground truth (tests/tiny_proof.ll)
+2. Independent grep-based recounting (tests/validate_correctness.sh)
+3. LLVM opt -stats cross-validation
+4. Byte-identical determinism across runs
+5. Runtime assert() counting invariants
+6. Unit tests (build/test_utilities.exe)
+7. Mutation fuzzing (300+ inputs)
+
+@page arch_data_flow Data Flow Diagrams
+The Mermaid sources live in docs/architecture/DATA_FLOW.md and are rendered
+nicely by GitHub, VS Code (Mermaid extension), or docs/architecture/index.html.
+
+@page arch_project_map Project Map
+See docs/architecture/PROJECT_MAP.md for the annotated repository tree.
+*/

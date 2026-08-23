@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LPTA · Architecture Visualized</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f8fb; --card: #ffffff; --ink: #1c2733; --muted: #5b6b7b;
+    --accent: #2563eb; --accent-soft: #eaf1fe; --line: #e3e9f1;
+    --code-bg: #0f172a; --code-ink: #dbe7ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+  }
+  header {
+    background: linear-gradient(135deg, #0f2a5c 0%, #2563eb 100%);
+    color: #fff; padding: 42px 24px 34px; text-align: center;
+  }
+  header h1 { margin: 0 0 6px; font-size: 28px; letter-spacing: .4px; }
+  header p { margin: 0 auto; max-width: 720px; color: #dce8ff; font-size: 15px; }
+  nav {
+    display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 18px;
+  }
+  nav a {
+    color: #eaf1fe; text-decoration: none; padding: 7px 14px; border-radius: 999px;
+    background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.25);
+    font-size: 13.5px; transition: background .15s;
+  }
+  nav a:hover { background: rgba(255,255,255,.24); }
+  main { max-width: 1150px; margin: 0 auto; padding: 30px 20px 70px; }
+  section.card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: 0 1px 3px rgba(16,32,64,.06), 0 8px 26px rgba(16,32,64,.05);
+    padding: 26px 28px 22px; margin: 26px 0;
+  }
+  h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; font-size: 21px; }
+  h2 .num {
+    flex: none; width: 30px; height: 30px; border-radius: 8px; background: var(--accent);
+    color: #fff; font-size: 15px; display: inline-flex; align-items: center; justify-content: center;
+  }
+  .sub { color: var(--muted); margin: 0 0 16px; font-size: 14.5px; }
+  .diagram {
+    overflow-x: auto; padding: 14px 8px 6px; border-radius: 10px;
+    background:
+      radial-gradient(circle at 1px 1px, #dde5ef 1px, transparent 0) 0 0/22px 22px,
+      #fbfcfe;
+  }
+  .note {
+    background: var(--accent-soft); border-left: 4px solid var(--accent);
+    border-radius: 0 8px 8px 0; padding: 10px 14px; font-size: 13.5px;
+    color: #274a80; margin-top: 14px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 8px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: .5px; }
+  code {
+    font-family: ui-monospace, Consolas, monospace; font-size: 12.8px;
+    background: var(--accent-soft); color: #274a80; padding: 1.5px 6px; border-radius: 6px;
+  }
+  footer { text-align: center; color: var(--muted); font-size: 13px; padding: 0 20px 40px; }
+  @media print { body { background: #fff; } .diagram { background: none; } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>LPTA &mdash; Architecture, Visualized</h1>
+  <p>LLVM Pass Transformation Analysis: three zoom levels of how data moves
+     through the tool &mdash; from a <code>.ll</code> file on disk to the interactive dashboard.</p>
+  <nav>
+    <a href="#pipeline">1 &middot; End-to-end pipeline</a>
+    <a href="#lifecycle">2 &middot; One pass execution</a>
+    <a href="#callmap">3 &middot; File call map</a>
+    <a href="../doxygen/html/index.html">Doxygen API docs &rarr;</a>
+  </nav>
+</header>
+
+<main>
+
+<section class="card" id="pipeline">
+  <h2><span class="num">1</span> End-to-end pipeline</h2>
+  <p class="sub">Disk to dashboard. Blue = execution steps, cylinders = artifacts on disk.
+     The orange-tinted cluster is the instrumentation layer &mdash; LPTA's core idea.</p>
+  <div class="diagram">
+<pre class="mermaid">
+flowchart TD
+    subgraph INPUT["Input preparation"]
+        C["real_test.c"] -->|"clang -emit-llvm -S"| LL[("real_test.ll")]
+    end
+
+    subgraph LPTA["build/lpta_test.exe"]
+        PARSE["parseIRFile<br/>(main.cpp)"] --> MOD["llvm::Module"]
+        MOD --> PB["PassBuilder.buildPerModuleDefaultPipeline(-O2)<br/>+ PassInstrumentationCallbacks"]
+        PB -->|"BEFORE callback"| PUSH["push PassFrame onto pass_stack<br/>+ before Event into g_events"]
+        PUSH --> RUN["the pass actually runs"]
+        RUN -->|"AFTER callback"| POP["match + pop frame by name & ir_ptr<br/>compute delta → after Event"]
+        RUN -.->|"loop deleted"| INV["INVALIDATED callback<br/>(fires instead of AFTER)"]
+    end
+
+    LL --> PARSE
+
+    subgraph OUTPUT["Artifacts in report dir"]
+        JSON[("history.json")]
+        IRO[("ir_before_opt.ll / ir_after_opt.ll")]
+        DASH["dashboard.html → index.html"]
+    end
+
+    MOD -->|"print()"| IRO
+    POP -->|"g_events"| JSON
+    IRO -->|"llc ×2 (Codegen.cpp)"| ASM["asm line / byte counts"]
+    ASM --> JSON
+    JSON --> SERVE["python -m http.server 8080"]
+    DASH --> SERVE
+    SERVE --> BROWSER["Browser dashboard<br/>fetch() history.json<br/>timeline · diffs · impact tables"]
+
+    style INV fill:#fff4e5,stroke:#e8930c,color:#8a5200
+</pre>
+  </div>
+  <div class="note"><b>Key point:</b> <code>pass_stack</code> is transient (alive only during
+  <code>MPM.run()</code>), <code>g_events</code> is the accumulated record, and
+  <code>history.json</code> is its serialization. The dashboard only ever sees events.</div>
+</section>
+
+<section class="card" id="lifecycle">
+  <h2><span class="num">2</span> Anatomy of one pass execution</h2>
+  <p class="sub">Why a <em>stack</em>, not a &ldquo;current pass&rdquo; variable: pipelines nest
+     (Module &rarr; Function &rarr; Loop). Every BEFORE must pair with exactly one AFTER across nesting.</p>
+  <div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant PM as LLVM PassManager
+    participant CB as LPTA callbacks (main.cpp)
+    participant ST as pass_stack
+    participant EV as g_events
+
+    PM->>CB: BEFORE ModuleToFunctionPassAdaptor (Module)
+    CB->>CB: detectIR → metrics snapshot
+    CB->>ST: push frame {depth=0}
+    CB->>EV: push "before" event
+
+    PM->>CB: BEFORE SimplifyCFGPass (Function entry)
+    CB->>ST: push frame {depth=1}
+    CB->>EV: push "before" event
+
+    Note over PM: SimplifyCFG mutates the function
+
+    PM->>CB: AFTER SimplifyCFGPass
+    CB->>ST: pop topmost frame matching name + ir_ptr
+    CB->>CB: delta = before vs after metrics
+    CB->>EV: push "after" event (+ IR diff if changed)
+
+    PM->>CB: AFTER ModuleToFunctionPassAdaptor
+    CB->>ST: pop outer frame (depth back to 0)
+    CB->>EV: push "after" event
+
+    Note over CB,EV: Invariant: MPM.run() returns with an empty stack → "Stack remaining: 0"
+</pre>
+  </div>
+  <div class="note"><b>The special case:</b> if a loop pass <em>deletes its own loop</em>, LLVM has no valid IR
+  object left to hand back &mdash; it fires <code>AfterPassInvalidated</code> <em>instead of</em> AFTER.
+  INVALIDATED events carry metrics-before but no after-state, matched by name alone (topmost, LIFO).</div>
+</section>
+
+<section class="card" id="callmap">
+  <h2><span class="num">3</span> File-level call map</h2>
+  <p class="sub">Solid = direct calls. Dashed = shared global state
+     (<code>inc/Config.h</code> + <code>src/globals.cpp</code>).</p>
+  <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+    MAIN["main.cpp<br/>CLI · wiring · 3 callbacks"]
+
+    subgraph COMPUTE["pure computation"]
+        DETC["Detection.cpp<br/>Any → which IR unit?"]
+        METC["Metrics.cpp<br/>10 structural counters"]
+    end
+
+    subgraph STATE["shared state"]
+        TRK["Tracker.cpp<br/>pass_stack · g_events"]
+        GLB["globals.cpp + Config.h<br/>output_dir · snapshots · opt level"]
+    end
+
+    subgraph SIDE["side effects"]
+        SNAP["Snapshots.cpp<br/>allowlist → .ll files"]
+        CODE["Codegen.cpp<br/>find llc → spawn → count lines"]
+        JW["JsonWriter.cpp<br/>escape → history.json"]
+    end
+
+    TEST["test_utilities.cpp<br/>57 unit tests"]
+
+    MAIN -->|"detectIR(IR)"| DETC
+    DETC --> METC
+    MAIN -->|"classifyPass · frames · events"| TRK
+    MAIN -->|"saveIRSnapshot"| SNAP
+    MAIN -->|"measureCodegen"| CODE
+    MAIN -->|"writeHistoryJSON"| JW
+    JW -->|"reads g_events"| TRK
+    SNAP -.-> GLB
+    CODE -.-> GLB
+    JW -.-> GLB
+    MAIN -.-> GLB
+    TEST --> METC
+    TEST --> TRK
+    TEST --> JW
+    TEST --> SNAP
+
+    style GLB fill:#fdf6e3,stroke:#b58900
+</pre>
+  </div>
+  <table>
+    <tr><th>Question</th><th>Follow the arrow into</th></tr>
+    <tr><td>Where do the numbers come from?</td><td><code>Detection.cpp</code> &rarr; <code>Metrics.cpp</code></td></tr>
+    <tr><td>Where is pass pairing enforced?</td><td><code>main.cpp</code> callbacks + <code>Tracker.cpp</code> stack</td></tr>
+    <tr><td>Why does the dashboard show diffs?</td><td><code>Snapshots.cpp</code> allowlist &rarr; IR strings &rarr; <code>JsonWriter.cpp</code></td></tr>
+    <tr><td>Where does asm size come from?</td><td><code>Codegen.cpp</code> (llc fallback chain, temp <code>.bat</code> on Windows)</td></tr>
+  </table>
+</section>
+
+</main>
+
+<footer>
+  Diagrams live as Mermaid sources in <code>docs/architecture/DATA_FLOW.md</code>.
+  Machine-generated per-function call graphs: <a href="../doxygen/html/index.html">Doxygen output</a>.
+</footer>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    securityLevel: "loose",
+    themeVariables: {
+      primaryColor: "#eaf1fe",
+      primaryBorderColor: "#2563eb",
+      primaryTextColor: "#1c2733",
+      lineColor: "#64748b",
+      fontSize: "14px",
+      fontFamily: "-apple-system, Segoe UI, Roboto, sans-serif"
+    },
+    flowchart: { curve: "basis", padding: 12 },
+    sequence: { actorMargin: 34, noteMargin: 12, mirrorActors: false }
+  });
+</script>
+</body>
+</html>
