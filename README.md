@@ -11,7 +11,7 @@ LLVM provides individual debugging options (`-print-before-all`, `-debug-pass-ma
 ## What LPTA Does
 
 ```
-Input: C source or LLVM IR
+Input: LLVM IR (.ll file)
   ↓
 LPTA runs the LLVM optimization pipeline (configurable: -O0 to -Oz)
   ↓
