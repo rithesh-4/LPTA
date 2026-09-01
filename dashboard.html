@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LPTA — LLVM Pass Transformation Analysis</title>
+<link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -32,13 +33,31 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg-
 .export-btn:hover{border-color:var(--accent);color:var(--text-primary)}
 
 /* MAIN */
-.main{margin-left:var(--sidebar-w);min-height:100vh}
-.page{display:none;padding:28px 36px 60px;max-width:1400px;margin:0 auto;animation:pIn .35s cubic-bezier(.4,0,.2,1)}
+.main{margin-left:var(--sidebar-w);min-height:100vh;position:relative;z-index:100}
+.page{display:none;padding:8px 20px 24px;max-width:1200px;animation:pIn .35s cubic-bezier(.4,0,.2,1)}
 .page.active{display:block}
+.page-content{width:100%}
+@keyframes pIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+
+/* Compare page specific - content at top, no sidebar overlap */
+#page-compare{padding-top:4px}
+#page-compare .page-header{margin-bottom:10px}
+#page-compare .compare-controls{margin-top:0;padding:16px}
+#page-compare .compare-file-row{gap:12px;flex-wrap:wrap}
+#page-compare .file-input-group{min-width:260px}
+#page-compare .compare-btn{margin-top:8px;align-self:flex-start}
+#page-compare .compare-results{margin-top:12px}
+#page-compare .compare-section{margin-bottom:12px}
+#page-compare .compare-section-header{padding:12px 16px}
+#page-compare .compare-section-body{padding:12px 16px}
+#page-compare .compare-grid{gap:10px}
+#page-compare .compare-stat{padding:12px}
+
+
 @keyframes pIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 
 /* PAGE HEADERS */
-.page-header{margin-bottom:28px}
+.page-header{margin-bottom:20px}
 .page-header h2{font-size:26px;font-weight:800;letter-spacing:-.7px;background:linear-gradient(135deg,var(--text-primary),var(--text-secondary));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .page-header p{font-size:13px;color:var(--text-muted);margin-top:4px}
 
@@ -82,6 +101,12 @@ canvas.sparkline{width:100%;height:80px;display:block}
 .chart-legend .dot.changed{background:var(--green)}.chart-legend .dot.unchanged{background:var(--accent)}.chart-legend .dot.invalidated{background:var(--red)}.chart-legend .dot.adaptor{background:var(--text-muted)}
 .chart-tooltip{display:none;position:absolute;background:var(--bg-tertiary);border:1px solid var(--border-light);border-radius:10px;padding:10px 14px;font-size:11px;pointer-events:none;z-index:10;white-space:nowrap;box-shadow:0 8px 24px rgba(0,0,0,.5);backdrop-filter:blur(8px)}
 .chart-tooltip .tt-name{font-weight:700;color:var(--text-primary)}.chart-tooltip .tt-ir{color:var(--text-secondary);font-size:10px;margin-top:2px}.chart-tooltip .tt-delta{color:var(--green);font-family:'JetBrains Mono',monospace;font-weight:600;margin-top:3px}
+
+/* CROSS-TARGET TABLE */
+.codegen-table{width:100%;border-collapse:collapse;font-size:12px}
+.codegen-table th,.codegen-table td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)}
+.codegen-table th{color:var(--text-muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+.codegen-table tr:hover{background:rgba(255,255,255,.02)}
 
 /* PIPELINE STATS */
 .pipe-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:20px}
@@ -146,6 +171,61 @@ canvas.sparkline{width:100%;height:80px;display:block}
 .view-btn{background:none;border:1px solid var(--border);color:var(--text-muted);width:24px;height:24px;border-radius:5px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:11px;transition:all .2s}
 .view-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-glow)}
 
+/* COMPARE */
+.compare-controls{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:24px;margin-bottom:24px}
+.compare-file-row{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.file-input-group{flex:1;min-width:280px}
+.file-input-group label{display:block;font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.file-input-wrap{display:flex;align-items:center;gap:12px}
+.file-input-wrap input[type="file"]{background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:8px 12px;border-radius:8px;font-size:11px;cursor:pointer;transition:all .2s}
+.file-input-wrap input[type="file"]:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+.file-name{font-size:10px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
+.vs-label{font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.5px;padding-bottom:4px}
+.compare-btn{background:linear-gradient(135deg,var(--accent),var(--purple));border:none;color:#fff;padding:10px 28px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;white-space:nowrap}
+.compare-btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 6px 20px var(--accent-glow)}
+.compare-btn:disabled{opacity:.5;cursor:not-allowed}
+
+
+
+.compare-results{animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+
+.compare-section{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;margin-bottom:20px;overflow:hidden}
+.compare-section-header{display:flex;justify-content:space-between;align-items:center;padding:16px 22px;background:var(--bg-tertiary);border-bottom:1px solid var(--border)}
+.compare-section-header h3{font-size:13px;font-weight:700}
+.compare-section-body{padding:18px 22px}
+
+.compare-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.compare-stat{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:10px;padding:16px}
+.compare-stat.warning{border-color:var(--yellow)}
+.compare-stat.critical{border-color:var(--red)}
+.compare-stat-label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:8px}
+.compare-stat-value{font-size:24px;font-weight:900;font-family:'JetBrains Mono',monospace;letter-spacing:-1px}
+.compare-stat-value.improved{color:var(--green)}
+.compare-stat-value.regressed{color:var(--red)}
+.compare-stat-value.neutral{color:var(--text-muted)}
+.compare-stat-delta{font-size:10px;color:var(--text-muted);margin-top:4px;font-family:'JetBrains Mono',monospace}
+
+.compare-table{width:100%;border-collapse:collapse;font-size:11px}
+.compare-table th,.compare-table td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)}
+.compare-table th{color:var(--text-muted);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;background:var(--bg-tertiary)}
+.compare-table tr:hover{background:rgba(255,255,255,.02)}
+.compare-table .neg{color:var(--green)}.compare-table .pos{color:var(--red)}.compare-table .zero{color:var(--text-muted)}
+.compare-table .warn{background:var(--yellow-soft)}.compare-table .crit{background:var(--red-soft)}
+
+.regression-list{display:flex;flex-direction:column;gap:8px}
+.regression-item{display:flex;align-items:flex-start;gap:10px;padding:12px 16px;border-radius:8px;font-size:11px}
+.regression-item.high{background:var(--red-soft);border:1px solid var(--red)}
+.regression-item.medium{background:var(--yellow-soft);border:1px solid var(--yellow)}
+.regression-item .r-icon{flex-shrink:0;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px}
+.regression-item.high .r-icon{background:var(--red);color:#fff}
+.regression-item.medium .r-icon{background:var(--yellow);color:#000}
+.regression-item .r-text{flex:1}
+.regression-item .r-type{font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
+.regression-item .r-pass{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--accent-light);margin-top:2px}
+
+.compare-empty{padding:60px;text-align:center;color:var(--text-muted)}
+
 /* MODALS */
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:1000;backdrop-filter:blur(8px);animation:mBgIn .2s ease}
 .modal-bg.open{display:flex;align-items:center;justify-content:center}
@@ -201,6 +281,51 @@ canvas.sparkline{width:100%;height:80px;display:block}
 
 /* MOBILE */
 @media(max-width:900px){.sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}.main{margin-left:0}.stat-grid{grid-template-columns:repeat(2,1fr)}.page{padding:16px}.overview-charts,.pipe-stats{grid-template-columns:1fr}}
+
+/* AI INSIGHTS */
+.ai-fab{position:fixed;right:22px;bottom:22px;z-index:900;background:linear-gradient(135deg,#6366f1,#a78bfa);color:#fff;border:none;border-radius:999px;padding:12px 20px;font-family:'Inter',sans-serif;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 10px 30px rgba(99,102,241,.35);display:flex;align-items:center;gap:8px;transition:all .2s}
+.ai-fab:hover{transform:translateY(-2px);box-shadow:0 14px 36px rgba(99,102,241,.45)}
+.ai-drawer{position:fixed;top:0;right:-440px;width:420px;max-width:96vw;height:100vh;background:var(--bg-primary);border-left:1px solid var(--border);z-index:1100;display:flex;flex-direction:column;transition:right .3s cubic-bezier(.4,0,.2,1);box-shadow:-20px 0 60px rgba(0,0,0,.5)}
+.ai-drawer.open{right:0}
+.ai-head{display:flex;justify-content:space-between;align-items:center;padding:15px 18px;border-bottom:1px solid var(--border)}
+.ai-head h3{font-size:14px;font-weight:800}
+.ai-head .ai-sub{font-size:10px;color:var(--text-muted);margin-top:2px;font-family:'JetBrains Mono',monospace}
+.ai-presets{display:flex;gap:6px;padding:12px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.ai-preset{background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);padding:6px 11px;border-radius:999px;font-size:10.5px;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif}
+.ai-preset:hover{border-color:var(--accent);color:var(--text-primary)}
+.ai-log{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+.ai-msg{max-width:94%;padding:10px 13px;border-radius:12px;font-size:12.5px;line-height:1.65;white-space:pre-wrap;word-wrap:break-word}
+.ai-msg.user{align-self:flex-end;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.25)}
+.ai-msg.assistant{align-self:flex-start;background:var(--bg-card);border:1px solid var(--border)}
+.ai-msg.error{align-self:flex-start;background:var(--red-soft);border:1px solid rgba(248,113,113,.3);color:#fca5a5;font-size:11.5px}
+.ai-msg.typing{color:var(--text-muted);font-style:italic}
+.ai-inputbar{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--border)}
+.ai-input{flex:1;background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-primary);padding:10px 12px;border-radius:9px;font-size:12px;font-family:'Inter',sans-serif;resize:none;height:42px}
+.ai-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+.ai-send{background:var(--accent);border:none;color:#fff;width:42px;border-radius:9px;cursor:pointer;font-size:15px;transition:all .2s}
+.ai-send:hover{background:#4f46e5}
+.ai-send:disabled{opacity:.5;cursor:not-allowed}
+.ai-explain-btn{background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.35);color:var(--accent-light);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-weight:600;font-family:'Inter',sans-serif;transition:all .2s}
+.ai-explain-btn:hover{border-color:var(--accent);background:rgba(99,102,241,.25)}
+.ai-answer-block{width:100%;background:var(--bg-primary);border:1px solid rgba(99,102,241,.3);border-radius:10px;padding:12px 14px;font-size:12px;line-height:1.65;white-space:pre-wrap;margin-top:10px;color:var(--text-secondary)}
+.ai-sessions{display:flex;gap:6px;padding:10px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap;align-items:center}
+.ai-sess-chip{display:inline-flex;align-items:center;gap:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);padding:4px 10px;border-radius:999px;font-size:10.5px;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif;max-width:160px}
+.ai-sess-chip .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ai-sess-chip:hover{border-color:var(--accent);color:var(--text-primary)}
+.ai-sess-chip.active{background:rgba(99,102,241,.18);border-color:var(--accent);color:var(--text-primary)}
+.ai-sess-chip .x{color:var(--text-muted);font-size:11px}
+.ai-sess-chip .x:hover{color:var(--red)}
+.ai-new-chat{background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.35);color:var(--green);padding:4px 10px;border-radius:999px;font-size:10.5px;cursor:pointer;font-family:'Inter',sans-serif;transition:all .2s}
+.ai-new-chat:hover{background:rgba(52,211,153,.22)}
+.ai-msg.assistant strong{color:var(--text-primary)}
+.ai-msg.assistant em{color:var(--text-secondary)}
+.ai-msg.assistant code{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#a5b4fc}
+.ai-msg.assistant pre{background:var(--bg-deep);border:1px solid var(--border);border-radius:8px;padding:10px 12px;overflow-x:auto;margin:8px 0;white-space:pre}
+.ai-msg.assistant pre code{background:none;border:none;padding:0}
+.ai-msg.assistant ul,.ai-msg.assistant ol{margin:6px 0 6px 20px}
+.ai-msg.assistant li{margin:3px 0}
+.ai-msg.assistant h4,.ai-msg.assistant h5{margin:10px 0 4px;font-size:13px;color:var(--text-primary)}
+.ai-msg.assistant p{margin:6px 0}
 </style>
 </head>
 <body>
@@ -224,6 +349,10 @@ canvas.sparkline{width:100%;height:80px;display:block}
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4m0 14v4M4.22 4.22l2.83 2.83m9.9 9.9l2.83 2.83M1 12h4m14 0h4M4.22 19.78l2.83-2.83m9.9-9.9l2.83-2.83"/></svg>
       Passes<span class="nav-badge" id="nav-pass-count">0</span><span class="nav-hint">4</span>
     </button>
+    <button class="nav-item" data-page="compare" onclick="goTo('compare')">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3"/><path d="M3 9a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3"/><path d="M9 15h6"/><path d="M9 9h6"/></svg>
+      Compare<span class="nav-hint">5</span>
+    </button>
   </div>
   <div class="sidebar-footer">
     <span id="sidebar-footer">LPTA v1.0</span>
@@ -242,6 +371,7 @@ canvas.sparkline{width:100%;height:80px;display:block}
     <div class="overview-charts" id="overview-charts"></div>
     <div class="story-banner reveal" id="overview-story"></div>
     <div id="overview-top-passes"></div>
+    <div id="overview-cross-target"></div>
   </div>
   <!-- PIPELINE -->
   <div class="page" id="page-pipeline">
@@ -283,6 +413,33 @@ canvas.sparkline{width:100%;height:80px;display:block}
       <div id="events"></div>
     </div>
   </div>
+  <!-- COMPARE -->
+  <div class="page" id="page-compare">
+    <div class="page-content">
+      <div class="page-header reveal"><h2>Compare Runs</h2><p>Compare two LPTA reports to detect regressions and measure optimization changes</p></div>
+      <div class="compare-controls reveal">
+        <div class="compare-file-row">
+          <div class="file-input-group">
+            <label>Baseline Report</label>
+            <div class="file-input-wrap">
+              <input type="file" id="base-file" accept=".json" onchange="loadBaseFile(event)">
+              <span class="file-name" id="base-file-name">No file selected</span>
+            </div>
+          </div>
+          <div class="vs-label">vs</div>
+          <div class="file-input-group">
+            <label>Current Report</label>
+            <div class="file-input-wrap">
+              <input type="file" id="curr-file" accept=".json" onchange="loadCurrFile(event)">
+              <span class="file-name" id="curr-file-name">No file selected</span>
+            </div>
+          </div>
+        </div>
+        <button class="compare-btn" id="compare-btn" onclick="runCompare()" disabled>Run Comparison</button>
+      </div>
+      <div class="compare-results" id="compare-results" style="display:none"></div>
+    </div>
+  </div>
 </div>
 
 <!-- IR DIFF MODAL -->
@@ -304,10 +461,40 @@ canvas.sparkline{width:100%;height:80px;display:block}
     <div class="func-detail-body">
       <div class="func-pass-list" id="func-pass-list"></div>
       <div class="func-chart-area">
-        <canvas id="func-canvas"></canvas>
-        <div id="func-diff-area" style="margin-top:16px"></div>
+        <div id="func-diff-area"></div>
+        <canvas id="func-canvas" style="margin-top:16px"></canvas>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- AI INSIGHTS DRAWER -->
+<button class="ai-fab" id="ai-fab" onclick="toggleAI()" title="AI Insights">✨ Ask AI</button>
+<div class="ai-drawer" id="ai-drawer">
+  <div class="ai-head">
+    <div><h3>✨ AI Insights</h3><div class="ai-sub" id="ai-status">checking backend…</div></div>
+    <button class="close-btn" onclick="toggleAI(false)">✕</button>
+  </div>
+  <div class="ai-presets" id="ai-presets">
+    <button class="ai-preset" onclick="askAIPreset('summarize')">📋 Summarize pipeline</button>
+    <button class="ai-preset" onclick="askAIPreset('top')">🏆 Explain top pass</button>
+    <button class="ai-preset" onclick="askAIPreset('next')">🔍 What should I look at?</button>
+  </div>
+  <div class="ai-sessions" id="ai-sessions"></div>
+  <div class="ai-log" id="ai-log"><div class="ai-msg assistant" id="ai-greet">Hi! I'm an LLVM compiler engineer embedded in LPTA. I explain optimization passes using **actual IR evidence** from this report — not generic pass descriptions.
+
+**What I can do:**
+• **Per-pass "✨ Explain" buttons** (in Pass Explorer and IR Diff modal) give evidence-grounded explanations following a structured format: what happened, exact IR change, why the pass did it, compiler concepts, legality, metric impact, performance significance, downstream effects.
+• **Presets** above: Summarize pipeline, Explain top pass, What to investigate next.
+• **Free-form chat**: Ask anything about this optimization run.
+
+**My rules:** Every claim grounded in the supplied data. No invented IR, no "fewer instructions = faster" without evidence. If evidence is missing, I'll say what I'd need.
+
+Click a preset or ask a question to start.</div></div>
+  <div class="ai-inputbar">
+    <textarea class="ai-input" id="ai-input" placeholder="e.g. why did instruction count drop so much?"
+      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();aiSendOrStop()}"></textarea>
+    <button class="ai-send" id="ai-send" onclick="aiSendOrStop()" title="Send">➤</button>
   </div>
 </div>
 
@@ -358,6 +545,7 @@ function render(){
   document.getElementById('nav-pass-count').textContent=s.passes_with_changes;
   document.getElementById('sidebar-footer').textContent=`${s.total_events} events`;
   renderOverview();renderFunctions();renderPasses();triggerReveals();
+  aiInitSessions();
   // URL routing
   const h=location.hash.replace('#','');
   if(['overview','pipeline','functions','passes'].includes(h)&&h!==currentPage)goTo(h);
@@ -393,12 +581,13 @@ function renderOverview(){
   const iArrow=iRed>0?`<span class="hl">${iRed} fewer</span>`:iRed<0?`<span class="hl-red">${-iRed} more</span>`:'no change';
   const cgArrow=cgRed>0?`<span class="hl">${cgPct}% smaller</span>`:cgRed<0?`<span class="hl-red">${-cgPct}% larger</span>`:'no change';
   document.getElementById('overview-story').innerHTML=`<h3>Pipeline Story</h3><p>
-    The <strong>-${D.pipeline}</strong> pipeline executed <strong>${s.total_before}</strong> passes.
+    The <strong>-${esc(D.pipeline)}</strong> pipeline executed <strong>${s.total_before}</strong> passes.
     <strong>${changedPasses}</strong> produced measurable changes — ${iArrow} in IR instructions,
     codegen is ${cgArrow}.
     ${s.total_invalidated>0?`<span class="hl-red">${s.total_invalidated} passes invalidated.</span>`:'Stack balanced.'}
   </p>`;
   renderTopPassesCompact();
+  renderCrossTarget();
 }
 
 function renderTopPassesCompact(){
@@ -407,6 +596,37 @@ function renderTopPassesCompact(){
   const sorted=Object.values(bp).sort((a,b)=>a.iD-b.iD).slice(0,6);
   if(!sorted.length){document.getElementById('overview-top-passes').innerHTML='';return}
   document.getElementById('overview-top-passes').innerHTML=`<div class="chart-container reveal"><div class="chart-header"><h3>Top Passes by Impact</h3><span class="hint">Aggregated instruction delta</span></div><div style="padding:14px 22px"><div class="top-grid">${sorted.map(p=>{const cls=p.iD<0?'neg':p.iD>0?'pos':'zero';return `<div class="top-card"><div><div class="tp-name">${esc(p.name)}</div><div class="tp-count">${p.count}×</div></div><div style="text-align:right"><div class="tp-delta ${cls}">${p.iD>0?'+':''}${p.iD}</div><div class="tp-sub">instr</div></div></div>`}).join('')}</div></div></div>`;
+}
+
+// ===== CROSS-TARGET CODEGEN =====
+function renderCrossTarget(){
+  if(!D)return;
+  const s=D.summary;
+  if(!s.codegen_targets || Object.keys(s.codegen_targets).length===0){
+    document.getElementById('overview-cross-target').innerHTML='';
+    return;
+  }
+  let html=`
+  <div class="chart-container reveal" style="margin-top:20px">
+    <div class="chart-header"><h3>Cross-Target Codegen Comparison</h3><span class="hint">Same optimized IR compiled for different target triples</span></div>
+    <div class="chart-body">
+      <table class="codegen-table">
+        <thead>
+          <tr><th>Target</th><th>Before</th><th>After</th><th>Reduction</th><th>Status</th></tr>
+        </thead>
+        <tbody>`;
+  for(const [target, tcg] of Object.entries(s.codegen_targets)){
+    if(tcg.error){
+      html+=`<tr><td>${esc(target)}</td><td style="color:var(--red)" colspan="5">Failed: ${esc(tcg.error)}</td></tr>`;
+    }else{
+      const red=tcg.asm_lines_before-tcg.asm_lines_after;
+      const pct=tcg.asm_lines_before?Math.round(red/tcg.asm_lines_before*100):0;
+      const arrow=red>0?'▼':red<0?'▲':'—';
+      html+=`<tr><td>${esc(target)}</td><td>${tcg.asm_lines_before}</td><td>${tcg.asm_lines_after}</td><td>${arrow} ${Math.abs(red)} (${pct}%)</td><td style="color:var(--green)">✓</td></tr>`;
+    }
+  }
+  html+=`</tbody></table></div></div>`;
+  document.getElementById('overview-cross-target').innerHTML=html;
 }
 
 // ===== OVERVIEW CHARTS =====
@@ -505,6 +725,7 @@ function renderFunctions(){
 
 // ===== FUNCTION DETAIL MODAL =====
 let currentFuncName = '';
+let FUNC_CHART_DATA = null;
 function openFuncDetail(funcName){
   if(!D)return;
   currentFuncName = funcName;
@@ -521,20 +742,23 @@ function openFuncDetail(funcName){
     return `<div class="func-pass-item" data-idx="${i}" onclick="selectFuncPass(${i})">
       <div class="fp-name">${esc(e.pass_name)}</div>
       <div class="fp-delta ${cls}">${delta>0?'+':''}${delta} instr · cum: ${cumInstr}</div>
-      <div class="fp-ir">${e.has_changes?'has IR diff':'no change'}</div>
+      <div class="fp-ir">${e.has_changes?(e.ir_before?'has IR diff':'changed · no snapshot'):e.event_type==='invalidated'?'invalidated':'no change'}</div>
     </div>`;
   });
   document.getElementById('func-pass-list').innerHTML=passItems.join('');
 
   // Chart: instruction count over passes
   const chartData=passEvents.map((e,i)=>({i,name:e.pass_name,before:e.metrics_before.instruction_count,after:e.metrics_after.instruction_count,delta:e.metrics_after.instruction_count-e.metrics_before.instruction_count,hasChanges:e.has_changes}));
-  drawFuncChart(chartData);
+  FUNC_CHART_DATA=chartData;
+  // Open the modal BEFORE drawing: the canvas measures zero while display:none
+  document.getElementById('func-modal-bg').classList.add('open');
+  requestAnimationFrame(()=>drawFuncChart(chartData));
   // Show first changed pass diff
   const firstChanged=passEvents.findIndex(e=>e.has_changes&&e.ir_before);
   if(firstChanged>=0)selectFuncPass(firstChanged);
-  else document.getElementById('func-diff-area').innerHTML='<div style="padding:40px;text-align:center;color:var(--text-muted)">No IR diffs available for this function</div>';
-
-  document.getElementById('func-modal-bg').classList.add('open');
+  else document.getElementById('func-diff-area').innerHTML='<div style="padding:40px;text-align:center;color:var(--text-muted);white-space:pre-line">'+(passEvents.some(e=>e.has_changes)
+    ?'No IR snapshots in this report.\nRe-run with --snapshots to unlock IR diffs:\n  lpta_test input.ll report -O2 --snapshots'
+    :'No IR diffs available for this function')+'</div>';
 }
 
 function drawFuncChart(data){
@@ -592,7 +816,11 @@ function selectFuncPass(idx){
   const funcName=currentFuncName||document.getElementById('func-modal-title').textContent.split('·')[0].trim();
   const passEvents=D.events.filter(e=>e.ir_kind==='Function'&&e.ir_name===funcName&&e.event_type==='after');
   const e=passEvents[idx];
-  if(!e||!e.ir_before){document.getElementById('func-diff-area').innerHTML='<div style="padding:30px;text-align:center;color:var(--text-muted)">No IR diff for this pass</div>';return}
+  if(!e||!e.ir_before){
+    const why=(e&&e.has_changes)
+      ?'This pass changed the IR, but no snapshot was captured for it.\nSnapshots require: lpta_test input.ll report -O2 --snapshots\n(and only the 12 high-impact allowlisted passes are captured).'
+      :'No IR diff for this pass';
+    document.getElementById('func-diff-area').innerHTML='<div style="padding:30px;text-align:center;color:var(--text-muted);white-space:pre-line">'+why+'</div>';return}
 
   const bL=e.ir_before.split('\n'),aL=e.ir_after.split('\n');
   const bS=new Set(bL),aS=new Set(aL);
@@ -602,7 +830,7 @@ function selectFuncPass(idx){
   const metrics=ms.map(([k,l])=>{const d=e.metrics_after[k]-e.metrics_before[k];const cls=d<0?'neg':d>0?'pos':'';return `<div class="m"><span class="ml">${l}:</span><span class="mv">${e.metrics_before[k]}→${e.metrics_after[k]}</span><span class="md ${cls}">${d>0?'+':''}${d}</span></div>`}).join('');
 
   document.getElementById('func-diff-area').innerHTML=`
-    <div style="font-size:12px;font-weight:700;margin-bottom:8px;font-family:'JetBrains Mono',monospace">${esc(e.pass_name)} <span style="color:var(--text-muted);font-weight:400">· IR diff</span></div>
+    <div style="font-size:12px;font-weight:700;margin-bottom:8px;font-family:'JetBrains Mono',monospace;display:flex;align-items:center;gap:10px">${esc(e.pass_name)} <span style="color:var(--text-muted);font-weight:400">· IR diff</span><button class="ai-explain-btn" onclick="explainEvent(event,${e.id})">✨ Explain</button></div>
     <div style="display:flex;gap:12px;margin-bottom:12px;font-size:11px">${metrics}</div>
     <div style="display:flex;gap:1px;border-radius:8px;overflow:hidden;border:1px solid var(--border)">
       <div style="flex:1;overflow:auto;max-height:300px;background:var(--bg-primary)"><div style="font-size:9px;color:var(--text-muted);padding:8px 12px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;border-bottom:1px solid var(--border)">Before</div>${renderLines(bL,aS,false)}</div>
@@ -642,7 +870,7 @@ function renderEvents(){
       if(e.has_changes){const p=[];const ms=['instruction_count','basic_block_count','branch_count','phi_count','call_count','load_count','store_count'];const ls=['instr','BB','br','phi','call','ld','st'];for(let j=0;j<ms.length;j++){const v=e.metrics_after[ms[j]]-e.metrics_before[ms[j]];if(v!==0)p.push(`<span class="${v<0?'neg':'pos'}">${ls[j]}${v>0?'+':''}${v}</span>`)}d=p.join(' ')}
       else d='<span class="nc">—</span>';
     }else if(e.event_type==='invalidated')d='<span class="nc">invalidated</span>';
-    return `<div class="ev ${rc}" ${canView?`onclick="openDiff(${e.id})"`:''}><span class="eid">${e.id}</span><span><span class="badge ${bc}">${e.event_type.slice(0,3)}</span></span><span class="pname"><span class="t-${e.pass_type}">${nest}${esc(e.pass_name)}</span></span><span class="iru">${e.ir_kind} ${esc(e.ir_name)}</span><span class="dep">${e.depth}</span><span class="dlt">${d}</span><span>${canView?'<button class="view-btn" title="View IR diff">⊕</button>':''}</span></div>`;
+    return `<div class="ev ${rc}" ${canView?`onclick="openDiff(${e.id})"`:''}><span class="eid">${e.id}</span><span><span class="badge ${bc}">${e.event_type.slice(0,3)}</span></span><span class="pname"><span class="t-${e.pass_type}">${nest}${esc(e.pass_name)}</span></span><span class="iru">${e.ir_kind} ${esc(e.ir_name)}</span><span class="dep">${e.depth}</span><span class="dlt">${d}</span><span>${canView?`<button class="view-btn" title="View IR diff">⊕</button> <button class="ai-explain-btn" title="Ask AI about this change" onclick="explainEvent(event,${e.id})">✨</button>`:''}</span></div>`;
   }).join('');
   document.getElementById('events').innerHTML=html||'<div style="padding:50px;text-align:center;color:var(--text-muted)">No events match filter</div>';
 }
@@ -782,13 +1010,15 @@ function renderChart(){
 function openDiff(eid){
   if(!eventMap)eventMap=new Map(D.events.map(e=>[e.id,e]));
   const e=eventMap.get(eid);if(!e||!e.ir_before)return;
+  CURRENT_DIFF_ID=eid;
   document.getElementById('modal-title').innerHTML=`<span class="hl">${esc(e.pass_name)}</span> · ${e.ir_kind} ${esc(e.ir_name)}`;
   const bL=e.ir_before.split('\n'),aL=e.ir_after.split('\n'),bS=new Set(bL),aS=new Set(aL);
   const render=(lines,otherSet,added)=>lines.map((l,i)=>{const cls=l.trim()&&!otherSet.has(l)?(added?'added':'removed'):'unchanged';return `<div class="ir-line ${cls}"><span class="ln">${i+1}</span><span class="code">${esc(l)}</span></div>`}).join('');
   document.getElementById('ir-before').innerHTML=render(bL,aS,false);
   document.getElementById('ir-after').innerHTML=render(aL,bS,true);
   const ms=[['instruction_count','Instructions'],['basic_block_count','BBs'],['branch_count','Branches'],['phi_count','PHIs'],['call_count','Calls'],['load_count','Loads'],['store_count','Stores']];
-  document.getElementById('modal-footer').innerHTML=ms.map(([k,l])=>{const d=e.metrics_after[k]-e.metrics_before[k];const cls=d<0?'neg':d>0?'pos':'';return `<div class="m"><span class="ml">${l}:</span><span class="mv">${e.metrics_before[k]} → ${e.metrics_after[k]}</span><span class="md ${cls}">${d>0?'+':''}${d}</span></div>`}).join('');
+  document.getElementById('modal-footer').innerHTML=ms.map(([k,l])=>{const d=e.metrics_after[k]-e.metrics_before[k];const cls=d<0?'neg':d>0?'pos':'';return `<div class="m"><span class="ml">${l}:</span><span class="mv">${e.metrics_before[k]} → ${e.metrics_after[k]}</span><span class="md ${cls}">${d>0?'+':''}${d}</span></div>`}).join('')
+    +'<button class="ai-explain-btn" onclick="explainCurrentDiff()">✨ Explain this change</button>';
   document.getElementById('modal-bg').classList.add('open');
 }
 function closeModal(){document.getElementById('modal-bg').classList.remove('open')}
@@ -821,7 +1051,7 @@ document.getElementById('search').addEventListener('input',renderEvents);
 // ===== KEYBOARD SHORTCUTS =====
 document.addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT')return;
-  if(e.key==='Escape'){closeModal();closeFuncModal();return}
+  if(e.key==='Escape'){closeModal();closeFuncModal();toggleAI(false);return}
   if(e.key==='1')goTo('overview');
   if(e.key==='2')goTo('pipeline');
   if(e.key==='3')goTo('functions');
@@ -850,10 +1080,601 @@ document.addEventListener('keydown',e=>{
 
 // ===== RESIZE =====
 let resizeTimer;
-new ResizeObserver(()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(D){if(currentPage==='pipeline'){renderChart();renderPipelineCharts()}if(currentPage==='overview')renderOverviewCharts()}},150)}).observe(document.querySelector('.main'));
+new ResizeObserver(()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(D){if(currentPage==='pipeline'){renderChart();renderPipelineCharts()}if(currentPage==='overview')renderOverviewCharts();if(FUNC_CHART_DATA&&document.getElementById('func-modal-bg').classList.contains('open'))drawFuncChart(FUNC_CHART_DATA)}},150)}).observe(document.querySelector('.main'));
+
+// ===== AI INSIGHTS =====
+let AI_HIST=[],AI_BUSY=false,AI_READY=null,CURRENT_DIFF_ID=null,AI_ABORT=null;
+let AI_SESSIONS=[],AI_CUR=null,AI_STORE=null;
+const AI_IR_CAP=6000;
+
+function toggleAI(force){
+  const d=document.getElementById('ai-drawer');if(!d)return;
+  const open=force!==undefined?force:!d.classList.contains('open');
+  d.classList.toggle('open',open);
+  // Re-probe the backend when opening: covers "server started after page load"
+  if(open&&!AI_READY)aiHealth();
+}
+
+// ---- Chat sessions (persisted per module+pipeline in localStorage) ----
+function aiInitSessions(){
+  if(!D)return;
+  AI_STORE='lpta-ai-'+D.module_name+'-'+D.pipeline;
+  try{AI_SESSIONS=JSON.parse(localStorage.getItem(AI_STORE)||'[]')||[]}catch(e){AI_SESSIONS=[]}
+  if(!Array.isArray(AI_SESSIONS))AI_SESSIONS=[];
+  AI_SESSIONS.forEach(s=>{if(!Array.isArray(s.messages))s.messages=[]});
+  AI_CUR=AI_SESSIONS[0]||{id:Date.now(),title:'New chat',messages:[]};
+  AI_HIST=AI_CUR.messages;
+  aiRenderSessions();aiRenderLog();
+}
+function aiEnsureCurrent(){if(!AI_SESSIONS.includes(AI_CUR))AI_SESSIONS.unshift(AI_CUR)}
+function aiPersist(){try{localStorage.setItem(AI_STORE,JSON.stringify(AI_SESSIONS.slice(0,15)))}catch(e){}}
+function aiNewChat(){
+  if(AI_CUR&&AI_CUR.messages.length){aiEnsureCurrent();aiPersist()}
+  AI_CUR={id:Date.now(),title:'New chat',messages:[]};
+  AI_HIST=AI_CUR.messages;
+  aiRenderSessions();aiRenderLog();
+}
+function aiSwitchSession(i){
+  const s=AI_SESSIONS[i];if(!s||s===AI_CUR)return;
+  if(AI_CUR&&AI_CUR.messages.length){aiEnsureCurrent();aiPersist()}
+  AI_CUR=s;AI_HIST=s.messages;
+  aiRenderSessions();aiRenderLog();
+}
+function aiDeleteSession(i){
+  const s=AI_SESSIONS[i];if(!s)return;
+  AI_SESSIONS.splice(i,1);
+  if(s===AI_CUR){
+    AI_CUR=AI_SESSIONS[0]||{id:Date.now(),title:'New chat',messages:[]};
+    AI_HIST=AI_CUR.messages;
+    aiRenderLog();
+  }
+  aiPersist();aiRenderSessions();
+}
+function aiRenderSessions(){
+  const box=document.getElementById('ai-sessions');if(!box)return;
+  let html='<button class="ai-new-chat" onclick="aiNewChat()">＋ New chat</button>';
+  (AI_SESSIONS||[]).forEach((s,i)=>{
+    if(!s.messages.length)return; // empty conversations stay invisible
+    html+=`<span class="ai-sess-chip ${s===AI_CUR?'active':''}" onclick="aiSwitchSession(${i})"><span class="t">${esc(s.title)}</span><span class="x" title="Delete" onclick="event.stopPropagation();aiDeleteSession(${i})">✕</span></span>`;
+  });
+  box.innerHTML=html;
+}
+function aiRenderLog(){
+  const log=document.getElementById('ai-log');if(!log)return;
+  log.querySelectorAll('.ai-msg:not(#ai-greet)').forEach(el=>el.remove());
+  (AI_HIST||[]).forEach(m=>{
+    if(m.role==='user')aiMsg('user',m.content);
+    else{const d=aiMsg('assistant','');d.innerHTML=mdToHtml(m.content)}
+  });
+}
+
+// ---- Minimal safe markdown: escape FIRST, then style ----
+function mdToHtml(src){
+  const lines=esc(src).split('\n');
+  let html='',inUl=false,inOl=false,inPre=false,buf=[];
+  const closeLists=()=>{if(inUl){html+='</ul>';inUl=false}if(inOl){html+='</ol>';inOl=false}};
+  const inline=t=>t
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+    .replace(/(^|[\s(])\*([^*\n]+)\*/g,'$1<em>$2</em>');
+  for(const raw of lines){
+    const l=raw.trim();
+    if(l.startsWith('```')){
+      if(inPre){html+='<pre><code>'+buf.join('\n')+'</code></pre>';buf=[];inPre=false}
+      else{closeLists();inPre=true}
+      continue;
+    }
+    if(inPre){buf.push(raw);continue}
+    let m;
+    if(m=l.match(/^#{1,4}\s+(.*)/)){closeLists();html+='<h4>'+inline(m[1])+'</h4>';continue}
+    if(m=l.match(/^[-*•]\s+(.*)/)){if(inOl){html+='</ol>';inOl=false}if(!inUl){html+='<ul>';inUl=true}html+='<li>'+inline(m[1])+'</li>';continue}
+    if(m=l.match(/^\d+[.)]\s+(.*)/)){if(inUl){html+='</ul>';inUl=false}if(!inOl){html+='<ol>';inOl=true}html+='<li>'+inline(m[1])+'</li>';continue}
+    if(!l){closeLists();continue}
+    closeLists();
+    html+='<p>'+inline(l)+'</p>';
+  }
+  if(inPre)html+='<pre><code>'+buf.join('\n')+'</code></pre>';
+  closeLists();
+  return html;
+}
+
+async function aiHealth(){
+  const el=document.getElementById('ai-status');
+  try{
+    const r=await fetch('/api/health');const h=await r.json();
+    AI_READY=!!h.ai;
+    el.textContent=AI_READY?('backend ready · '+(h.model||'model').split('/').pop()):'AI off · set NVIDIA_API_KEY (see README)';
+    document.getElementById('ai-presets').style.opacity=AI_READY?'1':'.45';
+  }catch(e){
+    AI_READY=false;
+    el.textContent='no backend · run serve_dashboard.py (README)';
+    document.getElementById('ai-presets').style.opacity='.45';
+  }
+}
+
+function aiSysPrompt(){
+  return `You are an expert LLVM compiler engineer embedded in LPTA (LLVM Pass Transformation Analyzer).
+LPTA runs the LLVM optimization pipeline on LLVM IR, instruments every pass execution via PassInstrumentationCallbacks,
+records IR state before/after each pass, computes structural metric deltas, and measures final codegen impact via llc.
+
+CORE PRINCIPLE: You are an evidence-first explainer. Every claim must be grounded in the supplied REPORT DATA.
+Never invent pass names, IR details, metric numbers, or transformations not present in the data.
+
+EXPLANATION STRUCTURE (follow this for per-pass explanations):
+A. WHAT HAPPENED — 1-3 sentence summary of the actual observed transformation.
+B. EXACT IR CHANGE — Show relevant BEFORE/AFTER snippets. Identify removed/added/replaced instructions, changed operands, SSA values, basic blocks, PHIs, branches, loads/stores, calls.
+C. WHY THE PASS DID THIS — Explain the compiler transformation (constant folding, CSE, DCE, SROA, CFG simplification, LICM, inlining, etc.). Explain the reasoning, not just the pass name.
+D. REQUIRED COMPILER CONCEPTS — Introduce minimum concepts needed (SSA, use-def, PHI, CFG, dominance, alias analysis, MemorySSA, loop invariance, etc.). Beginner-friendly but technically accurate.
+E. WHY LEGAL — Explain why LLVM can make this transformation while preserving semantics (no uses, no side effects, alias/dependence info, etc.).
+F. LPTA METRIC IMPACT — Explicitly interpret actual metric changes. Explain WHY each relevant metric changed, not just repeat numbers.
+G. PERFORMANCE SIGNIFICANCE — Distinguish IR structural improvement from actual performance improvement. Never claim "fewer IR instructions = faster" without evidence. Use hedging: "may create opportunities", "can enable", "reduces IR complexity".
+H. DOWNSTREAM EFFECTS — Explain how later passes could use the transformed IR (SROA → exposes scalars → InstCombine/EarlyCSE/GVN → SimplifyCFG/DCE/DSE). Use "can enable", "may expose", "creates opportunity" unless evidence confirms.
+I. WHY THIS MATTERS TO LPTA — Explain why this event is useful: correlates pass, actual IR, metric delta, codegen impact.
+
+PASS CLASSIFICATION:
+- LPTA categories: adaptor, pipeline, analysis, transformation, other (heuristic, not formal LLVM guarantee)
+- LLVM conceptual categories: distinguish when relevant
+
+SPECIAL PASS KNOWLEDGE:
+InstCombine: constant folding, algebraic identities, local combination, compare/bitwise simplification, strength reduction, libcalls
+SROA: aggregate alloca decomposition, scalarization, load/store removal, SSA promotion, PHI interaction
+EarlyCSE: redundant computations, redundant loads (when safe), available expressions, trivially dead instructions
+GVN: equivalent computations across control flow, value reuse, redundancy elimination
+SimplifyCFG: unreachable/dead blocks, block merging, branch folding, redundant PHIs, trivial terminators
+DSE: stores overwritten before read, never-observed stores, memory dependence reasoning
+SCCP: constant propagation, unreachable blocks, conditional→unconditional branches, newly dead code
+LICM: loop-invariant hoisting to preheader, sinking to exits, alias/memory-safety reasoning
+LoopUnroll: body duplication, induction variable changes, loop-control overhead reduction, remainder loops
+Inliner: call removal, callee body in caller, argument substitution, return propagation, follow-up simplification
+
+ACCURACY RULES (MANDATORY):
+1. Never fabricate an IR line.
+2. Never claim an instruction was removed unless absent from AFTER.
+3. Never claim an instruction was introduced unless present in AFTER.
+4. Never infer transformation solely from pass name.
+5. Never interpret structural metric reduction as guaranteed speedup.
+6. Never call an SSA value a physical register.
+7. Distinguish LLVM IR from machine code.
+8. Distinguish analysis results from transformations.
+9. Distinguish observed facts from inference.
+10. State uncertainty explicitly.
+11. Do not pretend to know more than the supplied IR demonstrates.
+12. When evidence is incomplete, say exactly what is missing.
+
+NO UNSUPPORTED PERFORMANCE CLAIMS:
+- "One fewer virtual register means less register pressure" → NO. Say: "One fewer SSA value/definition. Effect on physical register pressure depends on later lowering and register allocation."
+- "Instruction count decreased" ≠ "Program is faster"
+
+EVIDENCE HIERARCHY (prefer in order):
+1. Actual BEFORE IR
+2. Actual AFTER IR
+3. Exact metric deltas
+4. Pass name/type
+5. IR scope
+6. Surrounding pass context
+7. LLVM documentation/conceptual knowledge
+8. General compiler reasoning
+
+If these disagree, do NOT silently override observed IR with generic pass behavior.
+
+FOR GENERAL CHAT: Answer the actual question. Use same evidence-grounded philosophy. Reuse relevant context. Explain difficult terms before relying on them. Use concise examples. Maintain continuity.
+
+FOR "NO CHANGE" CASES: Do not conclude "pass did nothing." Possible: no applicable transformation, already happened, change outside tracked metrics, analysis-only, no applicable opportunity, structure changed without counter impact. If BEFORE/AFTER IR available, inspect first.
+
+INTERACTING PASSES: Optimization is iterative. Explain interactions as opportunities unless subsequent events confirm them.`;
+}
+
+function aiTrim(s,cap){
+  if(!s)return '(IR snapshot not captured for this pass — reason from metrics only)';
+  return s.length>cap?s.slice(0,cap)+'\n… ['+(s.length-cap)+' more chars truncated]':s;
+}
+
+function aiMetricsBlock(e){
+  const ms=['instruction_count','basic_block_count','branch_count','phi_count','call_count','load_count','store_count','return_count','function_count','global_count'];
+  return ms.map(k=>{
+    const b=(e.metrics_before&&e.metrics_before[k])||0,a=(e.metrics_after&&e.metrics_after[k])||0;
+    return `${k}: ${b} -> ${a}${a!==b?` (${a>b?'+':''}${a-b})`:''}`;
+  }).join('\n');
+}
+
+function passCategory(passName){
+  const n=passName.toLowerCase();
+  if(n.includes('sroa')) return 'scalar-replacement';
+  if(n.includes('instcombine')||n.includes('aggressiveinstcombine')) return 'peephole-combination';
+  if(n.includes('earlycse')||n.includes('gvn')||n.includes('newgvn')) return 'redundancy-elimination';
+  if(n.includes('simplifycfg')||n.includes('cfg')) return 'cfg-simplification';
+  if(n.includes('dse')||n.includes('deadstore')) return 'dead-store-elimination';
+  if(n.includes('dce')||n.includes('adce')||n.includes('bdce')||n.includes('deadcode')||n.includes('globaldce')) return 'dead-code-elimination';
+  if(n.includes('sccp')||n.includes('correlatedvalue')||n.includes('constantprop')) return 'constant-propagation';
+  if(n.includes('licm')||n.includes('loopinvariant')||n.includes('looploadelim')||n.includes('loopunswitch')||n.includes('looprotate')||n.includes('loopdistribute')||n.includes('loopvectorize')||n.includes('loopunroll')||n.includes('indvarsimp')||n.includes('loopidiom')||n.includes('loopdeletion')||n.includes('loopsimplify')||n.includes('lcssa')) return 'loop-optimization';
+  if(n.includes('inliner')||n.includes('inline')) return 'inlining';
+  if(n.includes('globalopt')||n.includes('globaldce')||n.includes('ipscp')||n.includes('functionattrs')||n.includes('argpromotion')||n.includes('deadargelim')||n.includes('constmerge')||n.includes('reversepostorder')||n.includes('postorder')||n.includes('moduletofunction')||n.includes('cgscc')||n.includes('coro')||n.includes('allocato')||n.includes('cgprofile')||n.includes('recompute')||n.includes('annotation')) return 'interprocedural-module';
+  if(n.includes('memcpyopt')||n.includes('moveautoinit')) return 'memory-optimization';
+  if(n.includes('vectorcombine')||n.includes('vplan')||n.includes('slp')) return 'vectorization';
+  if(n.includes('jumpthread')||n.includes('branch')||n.includes('switch')||n.includes('tailcallelim')) return 'control-flow';
+  if(n.includes('reassociate')||n.includes('constraint')||n.includes('float2int')||n.includes('lowerconstant')||n.includes('inferalignment')||n.includes('alignmentfrom')||n.includes('instsimplify')||n.includes('divrem')||n.includes('libcallshrink')||n.includes('speculative')||n.includes('dropunnecessary')||n.includes('warnmissed')||n.includes('attributor')) return 'canonicalization';
+  if(n.includes('analysis')||n.includes('require')||n.includes('invalidate')||n.includes('loopinfo')||n.includes('dom')||n.includes('memoryssa')||n.includes('aa')||n.includes('alias')||n.includes('dependence')) return 'analysis';
+  if(n.includes('adaptor')||n.includes('manager')||n.includes('passmanager')||n.includes('functiontoloop')||n.includes('looptopass')||n.includes('cgscc')) return 'adaptor';
+  return 'other';
+}
+
+function passKnowledgeHint(passName){
+  const cat=passCategory(passName);
+  const hints={
+    'scalar-replacement': 'SROA decomposes aggregate allocas into scalar SSA values. Look for: fewer loads/stores, removed alloca/gep, new PHIs for scalar components, exposed scalar arithmetic. Enables later scalar optimizations.',
+    'peephole-combination': 'InstCombine does local instruction simplification: constant folding, algebraic identities (x+0, x*1, x-x), compare/bitwise simplification, strength reduction (mul→shift), libcall simplification (strlen, memcpy). Primarily simplifies instructions, not CFG.',
+    'redundancy-elimination': 'EarlyCSE/GVN eliminate redundant computations. EarlyCSE: available expressions within a block. GVN: value equivalence across blocks using dominance. Look for: removed instructions whose results were already computed, replaced uses with existing SSA value.',
+    'cfg-simplification': 'SimplifyCFG cleans control flow: removes unreachable blocks, merges blocks with single pred/succ, folds branches (br true/false → unconditional), eliminates redundant PHIs, simplifies switch. Often runs after other passes create cleanup opportunities.',
+    'dead-store-elimination': 'DSE removes stores whose values are never read before being overwritten. Requires MemorySSA/alias analysis. Look for: store instructions disappearing, no new loads introduced.',
+    'dead-code-elimination': 'DCE/ADCE/BDCE/GlobalDCE remove instructions with no uses. ADCE: aggressive, removes control-dependent dead code. BDCE: bit-tracking. GlobalDCE: module-level. Look for: instructions disappearing, use-def chains cut.',
+    'constant-propagation': 'SCCP proves values constant, replaces uses, makes branches unconditional, exposes dead code. Interacts with CFG: constant condition → branch folding → unreachable blocks → more dead code.',
+    'loop-optimization': 'LICM hoists loop-invariant code to preheader (requires alias safety). LoopUnswitch moves invariant conditions out. IndVarSimplify canonicalizes induction variables. LoopIdiomRecognize finds patterns (memset, memcpy). LoopDeletion removes dead loops.',
+    'inlining': 'Inliner replaces call with callee body. Substitutes arguments, propagates return values. Often enables follow-up: constant propagation, SROA, dead code elimination. Look for: call removed, callee instructions appearing, new constants, new dead code.',
+    'interprocedural-module': 'Module-level passes: GlobalOpt (internalize, constant propagation), GlobalDCE (remove unused globals), FunctionAttrs (deduce attrs), ArgPromotion (byval→scalar), DeadArgElim (remove unused args), ConstMerge (merge constants).',
+    'memory-optimization': 'MemCpyOpt optimizes memcpy/memset/memmove. MoveAutoInit moves static initializers. Look for: simplified memory intrinsics, removed redundant copies.',
+    'vectorization': 'LoopVectorize/SLPVectorize/VectorCombine transform scalar loops to vector. Look for: new vector types, <N x T> operations, changed induction, remainder loops.',
+    'control-flow': 'JumpThreading duplicates blocks to thread jumps. TailCallElim converts call+ret to jump. Look for: new blocks, changed branch targets, call→branch.',
+    'canonicalization': 'Passes that put IR in canonical form: reassociate (associative ops), instsimplify (fold without creating instructions), constraint elimination, float2int, alignment inference. Prepare for later passes.',
+    'analysis': 'Analysis passes compute information (LoopInfo, DominatorTree, AA, MemorySSA, etc.) but do not transform IR. Metrics should not change.',
+    'adaptor': 'Pass managers and adaptors (FunctionToLoopPassAdaptor, CGSCCToFunctionPassAdaptor, ModuleToFunctionPassAdaptor) manage pass scheduling. Metrics reflect inner passes, not the adaptor itself.',
+    'other': 'Uncategorized pass. Explain based on observed IR changes and metrics.'
+  };
+  return hints[cat] || hints['other'];
+}
+
+function buildAIContext(){
+  if(!D)return '';
+  const s=D.summary,L=[];
+  L.push(`MODULE: ${D.module_name}`);
+  L.push(`PIPELINE: -${D.pipeline}`);
+  L.push(`SUMMARY: ${s.total_before} pass executions (before events), ${s.passes_with_changes} pass executions changed IR, ${s.total_invalidated} invalidated`);
+  L.push(`IR INSTRUCTIONS (module level): ${s.total_instructions_before} -> ${s.total_instructions_after} (${s.total_instructions_after - s.total_instructions_before > 0 ? '+' : ''}${s.total_instructions_after - s.total_instructions_before})`);
+  L.push(`BASIC BLOCKS (module level): ${s.total_bbs_before} -> ${s.total_bbs_after} (${s.total_bbs_after - s.total_bbs_before > 0 ? '+' : ''}${s.total_bbs_after - s.total_bbs_before})`);
+  L.push(`CODEGEN ASM LINES: ${s.codegen_asm_lines_before} -> ${s.codegen_asm_lines_after} (${s.codegen_asm_lines_after - s.codegen_asm_lines_before > 0 ? '+' : ''}${s.codegen_asm_lines_after - s.codegen_asm_lines_before})`);
+  L.push(`CODEGEN ASM BYTES: ${s.codegen_asm_bytes_before} -> ${s.codegen_asm_bytes_after} (${s.codegen_asm_bytes_after - s.codegen_asm_bytes_before > 0 ? '+' : ''}${s.codegen_asm_bytes_after - s.codegen_asm_bytes_before})`);
+
+  const bp={};
+  for(const e of D.events){
+    if(e.event_type!=='after'||!e.has_changes)continue;
+    const k=e.pass_name;
+    if(!bp[k])bp[k]={iD:0,bD:0,count:0,cat:passCategory(k)};
+    bp[k].iD+=((e.metrics_after.instruction_count||0)-(e.metrics_before.instruction_count||0));
+    bp[k].bD+=((e.metrics_after.basic_block_count||0)-(e.metrics_before.basic_block_count||0));
+    bp[k].count++;
+  }
+  const tops=Object.entries(bp).map(([n,v])=>({n,...v})).sort((a,b)=>a.iD-b.iD);
+  L.push('\nTOP PASSES BY INSTRUCTION DELTA (most negative = most reduction):');
+  tops.slice(0,15).forEach(p=>L.push(`  ${p.n} [${p.cat}]: ${p.iD>0?'+':''}${p.iD} instr, ${p.bD>0?'+':''}${p.bD} BBs (${p.count}x)`));
+
+  const fm={};
+  for(const e of D.events){
+    if(e.ir_kind!=='Function'||e.event_type!=='after'||!e.has_changes)continue;
+    const n=e.ir_name;
+    if(!fm[n])fm[n]={first:(e.metrics_before.instruction_count||0),last:(e.metrics_after.instruction_count||0),passes:0};
+    fm[n].last=(e.metrics_after.instruction_count||0);fm[n].passes++;
+  }
+  L.push('\nPER-FUNCTION INSTRUCTION COUNTS (first seen -> last seen):');
+  Object.entries(fm).sort((a,b)=>a[1].first - b[1].first).forEach(([n,m])=>L.push(`  ${n}: ${m.first} -> ${m.last} (${m.passes} changing passes, delta=${m.last - m.first > 0 ? '+' : ''}${m.last - m.first})`));
+
+  if(D.summary.optnone_detected) L.push(`\nNOTE: ${s.optnone_function_count} optnone function(s) were stripped before the pipeline: ${s.optnone_functions.join(', ')}. LPTA runs full pipeline on all functions to show optimization potential.`);
+
+  L.push('\n--- PASS EXECUTION SEQUENCE (changing passes only) ---');
+  for(const e of D.events){
+    if(e.event_type==='after' && e.has_changes){
+      const d=e.metrics_after.instruction_count - e.metrics_before.instruction_count;
+      L.push(`  [${e.id}] ${e.pass_name} @ ${e.ir_kind} ${e.ir_name} (depth=${e.depth}): instr ${d>0?'+':''}${d}, BB ${(e.metrics_after.basic_block_count - e.metrics_before.basic_block_count)>0?'+':''}${e.metrics_after.basic_block_count - e.metrics_before.basic_block_count}, snapshot=${e.ir_before?'yes':'no'}`);
+    }
+  }
+  return L.join('\n');
+}
+
+function eventAIContext(e){
+  const cat=passCategory(e.pass_name);
+  const hint=passKnowledgeHint(e.pass_name);
+  const hasSnap=!!e.ir_before;
+  const metricLines=['instruction_count','basic_block_count','branch_count','phi_count','call_count','load_count','store_count','return_count','function_count','global_count'].map(k=>{
+    const b=(e.metrics_before&&e.metrics_before[k])||0,a=(e.metrics_after&&e.metrics_after[k])||0;
+    return `${k}: ${b} -> ${a}${a!==b?` (${a>b?'+':''}${a-b})`:''}`;
+  }).join('\n');
+  
+  let ctx=`PASS: ${e.pass_name}
+CATEGORY: ${cat}
+KNOWN BEHAVIOR HINT: ${hint}
+IR UNIT: ${e.ir_kind} ${e.ir_name}
+DEPTH: ${e.depth}
+EVENT ID: ${e.id}
+HAS SNAPSHOT: ${hasSnap ? 'yes' : 'no (only metrics available)'}
+
+METRIC DELTAS:
+${metricLines}
+`;
+  if(hasSnap){
+    ctx+=`\nIR BEFORE:\n${aiTrim(e.ir_before)}\n\nIR AFTER:\n${aiTrim(e.ir_after)}\n`;
+  }else{
+    ctx+=`\nNOTE: No IR snapshot for this pass. Only metric deltas available. Explain based on metrics and pass category. If BEFORE/AFTER IR missing, state what you would need to give a precise explanation.`;
+  }
+  return ctx;
+}
+
+function aiMsg(cls,text){
+  const log=document.getElementById('ai-log');
+  const div=document.createElement('div');
+  div.className='ai-msg '+cls;
+  div.textContent=text;
+  log.appendChild(div);log.scrollTop=log.scrollHeight;
+  return div;
+}
+
+async function askAI(question,ctx){
+  if(!D){aiMsg('error','Report not loaded yet.');return}
+  if(AI_BUSY)return;
+  if(AI_READY===false){
+    toggleAI(true);aiMsg('error','AI backend is not configured.\nStart the dashboard with serve_dashboard.py and set NVIDIA_API_KEY (free key: build.nvidia.com).\nThe rest of this dashboard works without AI.');return}
+  AI_BUSY=true;
+  const sb=document.getElementById('ai-send');
+  sb.textContent='⏹';sb.title='Stop generating';
+  toggleAI(true);
+  if(!AI_CUR){AI_CUR={id:Date.now(),title:'New chat',messages:[]};AI_HIST=AI_CUR.messages}
+  if(AI_CUR.title==='New chat')AI_CUR.title=question.slice(0,32)+(question.length>32?'…':'');
+  aiEnsureCurrent();
+  aiMsg('user',question);
+  const typing=aiMsg('typing','thinking…');
+
+  const msgs=[{role:'system',content:aiSysPrompt()}];
+  for(const t of AI_HIST.slice(-6))msgs.push(t);
+  msgs.push({role:'user',content:question+'\n\n--- REPORT DATA ---\n'+ctx});
+
+  AI_ABORT=new AbortController();
+  try{
+    const r=await fetch('/api/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({messages:msgs}),
+      signal:AI_ABORT.signal
+    });
+    const j=await r.json().catch(()=>({}));
+    typing.remove();
+    if(!r.ok){
+      const hint=j.hint?('\n'+j.hint):'';
+      throw new Error((typeof j.error==='string'?j.error:JSON.stringify(j.error||('HTTP '+r.status)))+hint);
+    }
+    const msg=j.choices?.[0]?.message||{};
+    const answer=msg.content||msg.reasoning_content||'(empty response)';
+    AI_HIST.push({role:'user',content:question},{role:'assistant',content:answer});
+    const d=aiMsg('assistant','');d.innerHTML=mdToHtml(answer);
+    const log=document.getElementById('ai-log');log.scrollTop=log.scrollHeight;
+    aiPersist();aiRenderSessions();
+  }catch(err){
+    typing.remove();
+    if(err.name==='AbortError')aiMsg('assistant','⏹ Stopped.');
+    else aiMsg('error','⚠ '+err.message);
+  }finally{
+    AI_BUSY=false;AI_ABORT=null;
+    sb.textContent='➤';sb.title='Send';
+    const log=document.getElementById('ai-log');if(log)log.scrollTop=log.scrollHeight;
+  }
+}
+
+function aiSendOrStop(){
+  if(AI_BUSY){if(AI_ABORT)AI_ABORT.abort();return}
+  sendAI();
+}
+
+function sendAI(){
+  const inp=document.getElementById('ai-input');
+  const q=inp.value.trim();if(!q)return;
+  inp.value='';
+  askAI(q,buildAIContext());
+}
+
+function askAIPreset(kind){
+  if(!D)return;
+  if(kind==='summarize'){
+    askAI(`Summarize this optimization pipeline run as a compiler engineer would:
+- Which passes produced the largest IR reductions (cite pass names and instruction deltas)?
+- How did the IR change overall (instructions, basic blocks, key metrics)?
+- What was the codegen impact (assembly lines/bytes)?
+- Which functions saw the most change?
+- What optimization patterns dominate (scalar replacement, redundancy elimination, CFG cleanup, loop opts, inlining)?
+Use exact numbers from the report.`,buildAIContext());
+  }else if(kind==='top'){
+    let best=null;
+    for(const e of D.events){
+      if(e.event_type!=='after'||!e.has_changes)continue;
+      const d=e.metrics_after.instruction_count-e.metrics_before.instruction_count;
+      if(!best||d<best.d)best={d,e};
+    }
+    if(!best){aiMsg('error','No changing passes found in this report.');return}
+    const e=best.e;
+    askAI(`The largest instruction reduction in this run came from "${e.pass_name}" (delta ${best.d} instructions at one execution on ${e.ir_kind} ${e.ir_name}).
+Explain this change following the evidence-first structure:
+A. What happened? (1-3 sentence summary of observed transformation)
+B. Exact IR change (show relevant BEFORE/AFTER snippets, identify removed/added/replaced)
+C. Why did this pass do this? (compiler transformation reasoning)
+D. Required compiler concepts (SSA, use-def, PHI, dominance, alias analysis, etc.)
+E. Why was this legal? (no uses, no side effects, alias info, etc.)
+F. LPTA metric impact (explain WHY each changed metric changed)
+G. Performance significance (hedge: "may enable", "reduces IR complexity", not "faster")
+H. Downstream effects (what later passes can use this)
+I. Why this matters to LPTA
+If IR snapshot missing, say what you would need.`,eventAIContext(e));
+  }else if(kind==='next'){
+    askAI(`Acting as a compiler engineer reviewing this LPTA report:
+- Identify 2-3 specific passes or functions that deserve a closer look
+- For each, state the concrete metric numbers that make it interesting
+- Suggest specific questions to investigate (e.g., "Why did SROA increase PHIs in @loop_test?" "Why did IndVarSimplify reduce instructions but not blocks?")
+- Point at exact event IDs and metric deltas
+Base this entirely on the report data.`,buildAIContext());
+  }
+}
+
+function explainEvent(ev,id){
+  ev.stopPropagation();
+  if(!eventMap)eventMap=new Map(D.events.map(e=>[e.id,e]));
+  const e=eventMap.get(id);if(!e)return;
+  askAI(`Explain this specific pass execution following the evidence-first structure:
+
+PASS: ${e.pass_name}
+IR UNIT: ${e.ir_kind} ${e.ir_name}
+DEPTH: ${e.depth}
+EVENT ID: ${e.id}
+
+Required explanation structure:
+A. WHAT HAPPENED — 1-3 sentence summary of the actual observed transformation
+B. EXACT IR CHANGE — Show relevant BEFORE/AFTER snippets. Identify removed/added/replaced instructions, changed operands, SSA values, basic blocks, PHIs, branches, loads/stores, calls
+C. WHY THE PASS DID THIS — Explain the compiler transformation reasoning (not just pass name)
+D. REQUIRED COMPILER CONCEPTS — Minimum concepts needed (SSA, use-def, PHI, CFG, dominance, alias analysis, MemorySSA, loop invariance, etc.)
+E. WHY LEGAL — Why LLVM can make this while preserving semantics
+F. LPTA METRIC IMPACT — Explicitly interpret actual metric changes, explain WHY each changed
+G. PERFORMANCE SIGNIFICANCE — Distinguish IR improvement from actual performance. Hedge appropriately.
+H. DOWNSTREAM EFFECTS — How later passes could use this (use "can enable", "may expose")
+I. WHY THIS MATTERS TO LPTA
+
+If IR snapshot is missing, state exactly what you would need to give a precise explanation.`,eventAIContext(e));
+}
+
+function explainCurrentDiff(){
+  if(CURRENT_DIFF_ID==null)return;
+  const e=eventMap.get(CURRENT_DIFF_ID);if(!e)return;
+  askAI(`Explain this IR transformation step by step following the evidence-first structure:
+
+PASS: ${e.pass_name}
+IR UNIT: ${e.ir_kind} ${e.ir_name}
+DEPTH: ${e.depth}
+EVENT ID: ${e.id}
+
+Required explanation structure:
+A. WHAT HAPPENED — 1-3 sentence summary
+B. EXACT IR CHANGE — Reference specific removed/added patterns from the diff shown
+C. WHY THE PASS DID THIS — Transformation reasoning
+D. REQUIRED COMPILER CONCEPTS
+E. WHY LEGAL
+F. LPTA METRIC IMPACT — Use the exact metric deltas shown in the modal footer
+G. PERFORMANCE SIGNIFICANCE — Hedge appropriately
+H. DOWNSTREAM EFFECTS
+I. WHY THIS MATTERS TO LPTA
+
+The modal shows the exact line-by-line diff. Reference specific line changes.`,eventAIContext(e));
+}
+
+// ===== COMPARE =====
+let COMPARE_BASE = null;
+let COMPARE_CURR = null;
+
+function loadBaseFile(e){
+  const f=e.target.files[0];
+  if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{COMPARE_BASE=JSON.parse(r.result);document.getElementById('base-file-name').textContent=f.name;updateCompareBtn()};
+  r.readAsText(f);
+}
+function loadCurrFile(e){
+  const f=e.target.files[0];
+  if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{COMPARE_CURR=JSON.parse(r.result);document.getElementById('curr-file-name').textContent=f.name;updateCompareBtn()};
+  r.readAsText(f);
+}
+function updateCompareBtn(){
+  const btn=document.getElementById('compare-btn');
+  if(COMPARE_BASE&&COMPARE_CURR)btn.disabled=false;
+  else btn.disabled=true;
+}
+
+async function runCompare(){
+  const btn=document.getElementById('compare-btn');
+  btn.disabled=true;
+  btn.textContent='Comparing...';
+  const results=document.getElementById('compare-results');
+  results.style.display='block';
+  results.innerHTML='<div class="compare-empty">Running comparison...</div>';
+  try{
+    const resp=await fetch('/api/compare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({base:COMPARE_BASE,current:COMPARE_CURR})});
+    if(!resp.ok)throw new Error('Compare failed');
+    const cmp=await resp.json();
+    renderCompareResults(cmp);
+  }catch(err){
+    results.innerHTML=`<div class="compare-empty" style="color:var(--red)">Error: ${err.message}</div>`;
+  }
+  btn.disabled=false;
+  btn.textContent='Run Comparison';
+}
+
+function renderCompareResults(cmp){
+  const results=document.getElementById('compare-results');
+  const sb=cmp.summary;
+  const bm=cmp.base_meta;
+  const cm=cmp.curr_meta;
+  let html=`
+  <div class="compare-section reveal">
+    <div class="compare-section-header"><h3>Summary Comparison</h3><span class="hint">${esc(bm.module||'baseline')} (${bm.pipeline||'?'}) vs ${esc(cm.module||'current')} (${cm.pipeline||'?'})</span></div>
+    <div class="compare-section-body">
+      <div class="compare-grid">
+        ${renderCompareStat('Total Instructions (before)',sb.total_instructions_before)}
+        ${renderCompareStat('Total Instructions (after)',sb.total_instructions_after)}
+        ${renderCompareStat('Instruction Reduction',-sb.instruction_reduction_delta,true)}
+        ${renderCompareStat('Basic Blocks (after)',sb.total_bbs_after)}
+        ${renderCompareStat('Passes with Changes',sb.passes_with_changes)}
+        ${renderCompareStat('Codegen Lines (after)',sb.codegen_asm_lines_after)}
+        ${renderCompareStat('Codegen Reduction',-sb.codegen_reduction_delta,true)}
+        ${renderCompareStat('Invalidated Passes',sb.total_invalidated)}
+      </div>
+    </div>
+  </div>`;
+
+  if(cmp.targets && cmp.targets.length){
+    html+=`<div class="compare-section reveal"><div class="compare-section-header"><h3>Cross-Target Codegen</h3></div><div class="compare-section-body">
+      <table class="compare-table"><thead><tr><th>Target</th><th>Baseline Before</th><th>Baseline After</th><th>Baseline Δ</th><th>Current Before</th><th>Current After</th><th>Current Δ</th><th>Δ vs Baseline</th></tr></thead><tbody>`;
+    for(const t of cmp.targets){
+      if(!t.available){
+        html+=`<tr class="warn"><td>${esc(t.target)}</td><td colspan="6">Error: ${esc(t.base_error||t.curr_error)}</td></tr>`;
+      }else{
+        const cls=t.red_delta>0?'neg':t.red_delta<0?'pos':'zero';
+        html+=`<tr><td>${esc(t.target)}</td><td>${t.base_before}</td><td>${t.base_after}</td><td class="${t.base_red>0?'neg':t.base_red<0?'pos':'zero'}">${t.base_red>0?'+':''}${t.base_red}</td><td>${t.curr_before}</td><td>${t.curr_after}</td><td class="${t.curr_red>0?'neg':t.curr_red<0?'pos':'zero'}">${t.curr_red>0?'+':''}${t.curr_red}</td><td class="${cls}">${t.red_delta>0?'+':''}${t.red_delta}</td></tr>`;
+      }
+    }
+    html+=`</tbody></table></div></div>`;
+  }
+
+  if(cmp.passes && cmp.passes.length){
+    html+=`<div class="compare-section reveal"><div class="compare-section-header"><h3>Pass-Level Impact</h3><span class="hint">${cmp.passes.length} passes compared</span></div><div class="compare-section-body">
+      <table class="compare-table"><thead><tr><th>Pass</th><th>Baseline Count</th><th>Current Count</th><th>Count Δ</th><th>Baseline Instr Δ</th><th>Current Instr Δ</th><th>Instr Δ vs Baseline</th><th>Baseline BB Δ</th><th>Current BB Δ</th><th>BB Δ vs Baseline</th></tr></thead><tbody>`;
+    for(const p of cmp.passes){
+      const instrCls=p.instr_delta_delta<0?'neg':p.instr_delta_delta>0?'pos':'zero';
+      const bbCls=p.bb_delta_delta<0?'neg':p.bb_delta_delta>0?'pos':'zero';
+      const warn=p.instr_delta_delta>20||p.bb_delta_delta>10?' warn':'';
+      html+=`<tr class="${warn}"><td><strong>${esc(p.pass_name)}</strong></td><td>${p.base_count}</td><td>${p.curr_count}</td><td class="${p.count_delta<0?'neg':p.count_delta>0?'pos':'zero'}">${p.count_delta>0?'+':''}${p.count_delta}</td><td class="${p.base_instr_delta<0?'neg':p.base_instr_delta>0?'pos':'zero'}">${p.base_instr_delta>0?'+':''}${p.base_instr_delta}</td><td class="${p.curr_instr_delta<0?'neg':p.curr_instr_delta>0?'pos':'zero'}">${p.curr_instr_delta>0?'+':''}${p.curr_instr_delta}</td><td class="${instrCls}">${p.instr_delta_delta>0?'+':''}${p.instr_delta_delta}</td><td class="${p.base_bb_delta<0?'neg':p.base_bb_delta>0?'pos':'zero'}">${p.base_bb_delta>0?'+':''}${p.base_bb_delta}</td><td class="${p.curr_bb_delta<0?'neg':p.curr_bb_delta>0?'pos':'zero'}">${p.curr_bb_delta>0?'+':''}${p.curr_bb_delta}</td><td class="${bbCls}">${p.bb_delta_delta>0?'+':''}${p.bb_delta_delta}</td></tr>`;
+    }
+    html+=`</tbody></table></div></div>`;
+  }
+
+  if(cmp.regressions && cmp.regressions.length){
+    html+=`<div class="compare-section reveal"><div class="compare-section-header"><h3>⚠ Regressions Detected</h3><span class="hint">${cmp.regressions.length} issue(s) found</span></div><div class="compare-section-body">
+      <div class="regression-list">`;
+    for(const r of cmp.regressions){
+      html+=`<div class="regression-item ${r.severity}"><div class="r-icon">${r.severity==='high'?'⚠':'⚡'}</div><div class="r-text"><div>${esc(r.message)}</div>${r.pass?`<div class="r-pass">Pass: ${esc(r.pass)}</div>`:''}</div></div>`;
+    }
+    html+=`</div></div></div>`;
+  }
+
+  if(!cmp.passes?.length && !cmp.targets?.length && !cmp.regressions?.length){
+    html+=`<div class="compare-section reveal"><div class="compare-section-header"><h3>No Significant Differences</h3></div><div class="compare-section-body"><div class="compare-empty">The two reports are essentially identical.</div></div></div>`;
+  }
+
+  results.innerHTML=html;
+  triggerReveals();
+}
+
+function renderCompareStat(label,val,invert=false){
+  let cls='neutral';
+  if(val>0)cls=invert?'regressed':'improved';
+  else if(val<0)cls=invert?'improved':'regressed';
+  return `<div class="compare-stat ${val>50||val<-50?'critical':val>20||val<-20?'warning':''}"><div class="compare-stat-label">${esc(label)}</div><div class="compare-stat-value ${cls}">${val>0?'+':''}${val}</div><div class="compare-stat-delta">vs baseline</div></div>`;
+}
 
 // ===== INIT =====
 load();
+aiHealth();
 </script>
 </body>
 </html>

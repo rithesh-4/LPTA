@@ -1,6 +1,7 @@
 #include "Snapshots.h"
 
 #include "Config.h"
+#include "Util.h"
 
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Function.h"
@@ -9,7 +10,6 @@
 
 #include <cassert>
 #include <filesystem>
-#include <cctype>
 
 using namespace llvm;
 namespace fs = std::filesystem;
@@ -18,6 +18,12 @@ const std::set<std::string> g_snapshot_allowlist = {
     "InstCombinePass", "SimplifyCFGPass", "GVNPass", "LICMPass",
     "SROAPass", "EarlyCSEPass", "DSEPass", "SCCPPass",
     "LoopUnrollPass", "InlinerPass", "GlobalOptPass", "GlobalDCEPass",
+    "LoopVectorizePass", "SLPVectorizerPass", "JumpThreadingPass",
+    "CorrelatedValuePropagationPass", "BDCEPass", "ADCEPass",
+    "ReassociatePass", "LoopDistributePass", "LoopRotatePass",
+    "LoopIdiomRecognizePass", "IndVarSimplifyPass", "LoopSinkPass",
+    "MemCpyOptPass", "TailCallElimPass", "DeadArgumentEliminationPass",
+    "ConstantMergePass", "AggressiveInstCombinePass", "SpeculativeExecutionPass",
 };
 
 // Formal verification: shouldSnapshot is a pure predicate.
@@ -25,28 +31,6 @@ const std::set<std::string> g_snapshot_allowlist = {
 // Postcondition: returns true only if snapshots are enabled AND pass is in allowlist.
 bool shouldSnapshot(StringRef pass_name) {
     return g_snapshots && g_snapshot_allowlist.count(pass_name.str());
-}
-
-// Formal verification: sanitizeFilename produces a safe filesystem name.
-// Postcondition: result is non-empty, contains only [a-zA-Z0-9_.-],
-//   and is at most as long as the input.
-std::string sanitizeFilename(const std::string &s) {
-    std::string r;
-    r.reserve(s.size());
-    for (char c : s) {
-        if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' || c == '.') {
-            r += c;
-        } else {
-            r += '_';
-        }
-    }
-    if (r.empty()) r = "unnamed";
-    // Formal verification: result must contain only safe filesystem characters
-    for (char c : r) {
-        assert((std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' || c == '.') &&
-               "sanitizeFilename: result contains unsafe character");
-    }
-    return r;
 }
 
 void saveIRSnapshot(const std::string &suffix, const Any &IR,

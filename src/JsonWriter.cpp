@@ -186,6 +186,32 @@ void writeHistoryJSON(const std::string &filename, const CodegenResult &cg) {
     f << "    \"codegen_asm_lines_after\": " << cg.asm_lines_after << ",\n";
     f << "    \"codegen_asm_bytes_before\": " << cg.asm_size_before << ",\n";
     f << "    \"codegen_asm_bytes_after\": " << cg.asm_size_after << ",\n";
+    f << "    \"codegen_error_before\": " << (cg.error_before.empty() ? "null" : ("\"" + jsonEscape(cg.error_before) + "\"")) << ",\n";
+    f << "    \"codegen_error_after\": " << (cg.error_after.empty() ? "null" : ("\"" + jsonEscape(cg.error_after) + "\"")) << ",\n";
+    // Multi-target codegen data — always emit for stable schema (M2 fix)
+    f << "    \"codegen_targets\": ";
+    if (!cg.per_target.empty()) {
+        f << "{\n";
+        bool first = true;
+        for (const auto& [target, tr] : cg.per_target) {
+            if (!first) f << ",\n";
+            first = false;
+            f << "      \"" << jsonEscape(target) << "\": {\n";
+            f << "        \"asm_lines_before\": " << tr.asm_lines_before << ",\n";
+            f << "        \"asm_lines_after\": " << tr.asm_lines_after << ",\n";
+            f << "        \"asm_bytes_before\": " << tr.asm_size_before << ",\n";
+            f << "        \"asm_bytes_after\": " << tr.asm_size_after << ",\n";
+            if (!tr.error.empty()) {
+                f << "        \"error\": \"" << jsonEscape(tr.error) << "\"\n";
+            } else {
+                f << "        \"error\": null\n";
+            }
+            f << "      }";
+        }
+        f << "\n    },\n";
+    } else {
+        f << "{},\n";
+    }
     // Optnone data
     f << "    \"optnone_detected\": " << (g_optnone_detected ? "true" : "false") << ",\n";
     f << "    \"optnone_function_count\": " << g_optnone_functions.size() << ",\n";

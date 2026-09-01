@@ -52,6 +52,7 @@ add_executable(
     src/Codegen.cpp
     src/Tracker.cpp
     src/JsonWriter.cpp
+    src/Util.cpp
 )
 
 # ------------------------------------------------------------
@@ -72,6 +73,18 @@ llvm_map_components_to_libnames(
     x86codegen
     x86desc
     x86info
+    aarch64asmparser
+    aarch64codegen
+    aarch64desc
+    aarch64info
+    armasmparser
+    armcodegen
+    armdesc
+    arminfo
+    riscvasmparser
+    riscvcodegen
+    riscvdesc
+    riscvinfo
 )
 
 target_include_directories(lpta_test PRIVATE ${LLVM_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/inc)
@@ -95,6 +108,7 @@ add_executable(
     src/Tracker.cpp
     src/JsonWriter.cpp
     src/Snapshots.cpp
+    src/Util.cpp
 )
 
 target_include_directories(test_utilities PRIVATE ${LLVM_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/inc)

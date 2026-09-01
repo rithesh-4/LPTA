@@ -81,6 +81,31 @@ python -m http.server 8080
 # Open http://localhost:8080
 ```
 
+### Optional: AI Insights via NVIDIA NIM
+
+The dashboard has a built-in **Ask AI** panel (chat, one-click presets, and per-pass
+"Explain this change" in every IR diff) powered by free models from
+[build.nvidia.com](https://build.nvidia.com). It is fully optional — the dashboard works
+identically without it.
+
+```bash
+# 1. Get a free key (nvapi-...) at https://build.nvidia.com/settings/api-keys
+# 2. Export it (never commit it):
+export NVIDIA_API_KEY=nvapi-...        # Windows: set NVIDIA_API_KEY=nvapi-...
+# 3. Serve the report with the bundled server instead of http.server:
+python serve_dashboard.py report -p 8080
+```
+
+- Model/endpoint are switchable without code changes: `LPTA_AI_MODEL`, `LPTA_AI_BASE_URL`
+  (any OpenAI-compatible endpoint works).
+- The panel supports free-text chat with markdown-formatted answers, a **stop button** for
+  in-flight generations, and **chat history**: conversations are kept per module+pipeline
+  (in the browser's localStorage), switchable via chips, with "＋ New chat" to start fresh.
+- Privacy: nothing leaves your machine until you click an AI control; requests carry only
+  aggregate metrics plus the IR excerpt of the single pass you asked about. The API key
+  stays in the server process environment — the browser never sees it.
+- No key set → the panel shows setup instructions; everything else is unaffected.
+
 ## What the Dashboard Shows
 
 ### Summary Cards

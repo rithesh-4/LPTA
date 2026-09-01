@@ -51,7 +51,7 @@ namespace fs = std::filesystem;
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots]\n";
+        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n";
         return 1;
     }
 
@@ -62,6 +62,67 @@ int main(int argc, char **argv) {
         std::string arg = argv[i];
         if (arg == "--snapshots") {
             g_snapshots = true;
+        } else if (arg.rfind("--targets=", 0) == 0) {
+            std::string targets_arg = arg.substr(10); // skip "--targets="
+            auto trimCopy = [](std::string s) -> std::string {
+                auto first = s.find_first_not_of(" \t\r\n");
+                if (first == std::string::npos) return "";
+                auto last = s.find_last_not_of(" \t\r\n");
+                return s.substr(first, last - first + 1);
+            };
+            if (targets_arg.empty()) {
+                errs() << "ERROR: --targets requires a value (common|triple,...|@file)\n";
+                return 1;
+            }
+            if (targets_arg == "common") {
+                g_target_triples.assign(COMMON_TARGETS.begin(), COMMON_TARGETS.end());
+            } else if (targets_arg.rfind("@", 0) == 0) {
+                // File-based: --targets=@targets.txt
+                std::string filename = trimCopy(targets_arg.substr(1));
+                if (filename.empty()) {
+                    errs() << "ERROR: --targets=@file requires a filename\n";
+                    return 1;
+                }
+                std::ifstream f(filename);
+                if (!f) {
+                    errs() << "ERROR: cannot open targets file '" << filename << "'\n";
+                    return 1;
+                }
+                std::string line;
+                while (std::getline(f, line)) {
+                    line = trimCopy(line);
+                    if (!line.empty() && line[0] != '#') {
+                        g_target_triples.push_back(line);
+                    }
+                }
+            } else {
+                // Comma-separated list (also supports 'common' as an item to expand)
+                std::stringstream ss(targets_arg);
+                std::string item;
+                while (std::getline(ss, item, ',')) {
+                    item = trimCopy(item);
+                    if (item.empty()) continue;
+                    if (item == "common") {
+                        for (auto &t : COMMON_TARGETS) g_target_triples.push_back(t);
+                    } else {
+                        g_target_triples.push_back(item);
+                    }
+                }
+            }
+            // Deduplicate preserving first occurrence order
+            {
+                std::set<std::string> seen;
+                std::vector<std::string> dedup;
+                dedup.reserve(g_target_triples.size());
+                for (auto &t : g_target_triples) {
+                    if (seen.insert(t).second) dedup.push_back(t);
+                }
+                g_target_triples.swap(dedup);
+            }
+            if (g_target_triples.empty()) {
+                errs() << "ERROR: --targets produced no valid targets\n";
+                return 1;
+            }
         } else if (arg == "-O0" || arg == "--O0") {
             g_opt = OptimizationLevel::O0; g_opt_level = "O0";
         } else if (arg == "-O1" || arg == "--O1") {
@@ -76,7 +137,7 @@ int main(int argc, char **argv) {
             g_opt = OptimizationLevel::Oz; g_opt_level = "Oz";
         } else if (!arg.empty() && arg[0] == '-') {
             errs() << "ERROR: unknown option '" << arg << "'\n";
-            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots]\n";
+            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n";
             return 1;
         } else if (input_file.empty()) {
             input_file = arg;
@@ -85,13 +146,13 @@ int main(int argc, char **argv) {
             output_dir_set = true;
         } else {
             errs() << "ERROR: unexpected argument '" << arg << "'\n";
-            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots]\n";
+            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n";
             return 1;
         }
     }
 
     if (input_file.empty()) {
-        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots]\n";
+        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n";
         return 1;
     }
 
@@ -103,15 +164,35 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    // Parse IR
+    // Parse IR — empty .ll must succeed (AGENTS invariant: empty = exit 0)
     LLVMContext Context;
     SMDiagnostic Err;
-    std::unique_ptr<Module> M = parseIRFile(input_file, Err, Context);
-    if (!M) {
-        Err.print(argv[0], errs());
-        return 1;
+    std::unique_ptr<Module> M;
+    {
+        std::error_code ec_fs;
+        auto fsize = fs::file_size(input_file, ec_fs);
+        if (!ec_fs && fsize == 0) {
+            M = std::make_unique<Module>(input_file, Context);
+        } else {
+            M = parseIRFile(input_file, Err, Context);
+            if (!M) {
+                // Check whitespace-only file (e.g. "\n  \n") -> treat as empty
+                std::ifstream cf(input_file);
+                std::string content((std::istreambuf_iterator<char>(cf)), std::istreambuf_iterator<char>());
+                bool all_ws = !content.empty() && std::all_of(content.begin(), content.end(),
+                    [](unsigned char c){ return std::isspace(c); });
+                if (all_ws) {
+                    M = std::make_unique<Module>(input_file, Context);
+                } else {
+                    Err.print(argv[0], errs());
+                    return 1;
+                }
+            }
+        }
     }
-    g_module_name = M->getName().str();
+    // Use basename for determinism (M3 fix: absolute path would leak into history.json)
+    g_module_name = fs::path(M->getName().str().empty() ? input_file : M->getName().str()).filename().string();
+    if (g_module_name.empty()) g_module_name = fs::path(input_file).filename().string();
 
     // ============================================================
     // Detect optnone functions
@@ -172,6 +253,7 @@ int main(int argc, char **argv) {
                     frame.ir_before = std::move(snap);
             }
             unsigned frame_depth = frame.depth;
+            bool before_kept = !frame.ir_before.empty();
             pass_stack.push_back(std::move(frame));
 
             // Record event. Note: ir_before is intentionally NOT copied into
@@ -193,8 +275,8 @@ int main(int argc, char **argv) {
                    << "  {" << irUnitKindName(det.kind) << " " << det.name << "}"
                    << "  depth=" << frame_depth << "\n";
 
-            // IR snapshot (before)
-            if (shouldSnapshot(PassID))
+            // IR snapshot (before) — gated by same 4 MiB cap as JSON (H5 fix)
+            if (shouldSnapshot(PassID) && before_kept)
                 saveIRSnapshot("before", IR, PassID.str(), current_event_id);
         });
 
@@ -205,18 +287,34 @@ int main(int argc, char **argv) {
                 return;
             }
 
-            // Find matching frame by IR unit pointer (stable identity across
-            // BEFORE/AFTER), searching from the top of the stack. If the IR
-            // unit is unknown (nullptr), fall back to name matching.
+            // Find matching frame by IR unit pointer (stable identity).
+            // For Unknown (nullptr) we cannot rely on pointer, so match by
+            // kind+name to avoid popping wrong IR unit (H1 fix).
             const void *ir_ptr = irUnitPointer(IR);
-            auto it = std::find_if(pass_stack.rbegin(), pass_stack.rend(),
-                [&](const PassFrame &f) {
-                    if (f.pass_name != PassID.str()) return false;
-                    return ir_ptr == nullptr || f.ir_ptr == ir_ptr;
-                });
-            if (it == pass_stack.rend() && ir_ptr != nullptr) {
+            IRDetection detEarly = detectIR(IR);
+            auto it = pass_stack.rend();
+            if (ir_ptr != nullptr) {
                 it = std::find_if(pass_stack.rbegin(), pass_stack.rend(),
-                    [&](const PassFrame &f) { return f.pass_name == PassID.str(); });
+                    [&](const PassFrame &f) { return f.pass_name == PassID.str() && f.ir_ptr == ir_ptr; });
+                if (it == pass_stack.rend()) {
+                    it = std::find_if(pass_stack.rbegin(), pass_stack.rend(),
+                        [&](const PassFrame &f) { return f.pass_name == PassID.str(); });
+                }
+            } else {
+                // Unknown — pointer is null, match by kind/name first
+                it = std::find_if(pass_stack.rbegin(), pass_stack.rend(),
+                    [&](const PassFrame &f) {
+                        return f.pass_name == PassID.str() && f.ir_ptr == nullptr &&
+                               f.ir_kind == detEarly.kind && f.ir_name == detEarly.name;
+                    });
+                if (it == pass_stack.rend()) {
+                    it = std::find_if(pass_stack.rbegin(), pass_stack.rend(),
+                        [&](const PassFrame &f) { return f.pass_name == PassID.str() && f.ir_ptr == nullptr; });
+                }
+                if (it == pass_stack.rend()) {
+                    it = std::find_if(pass_stack.rbegin(), pass_stack.rend(),
+                        [&](const PassFrame &f) { return f.pass_name == PassID.str(); });
+                }
             }
 
             if (it == pass_stack.rend()) {
@@ -229,7 +327,7 @@ int main(int argc, char **argv) {
             // Remove the matched frame
             pass_stack.erase(std::next(it).base());
 
-            IRDetection det = detectIR(IR);
+            IRDetection det = detEarly;
             bool changes = hasAnyDelta(frame.before, det.metrics);
 
             // Record event (using same ID as BEFORE)
@@ -247,17 +345,30 @@ int main(int argc, char **argv) {
             ev.ir_before = std::move(frame.ir_before);
             // Snapshot size cap is decided jointly for the pair: keep
             // before/after only if BOTH sides fit under the cap, so the
-            // dashboard never renders a one-sided diff.
+            // dashboard never renders a one-sided diff. Also clean orphaned before file.
+            bool both_fit = true;
             {
                 static constexpr size_t kMaxSnapshotBytes = 4 * 1024 * 1024;
                 std::string afterSnap;
                 if (changes && shouldSnapshot(PassID))
                     afterSnap = serializeIR(IR);
-                bool both_fit = ev.ir_before.size() <= kMaxSnapshotBytes &&
-                                afterSnap.size() <= kMaxSnapshotBytes;
+                both_fit = ev.ir_before.size() <= kMaxSnapshotBytes &&
+                           afterSnap.size() <= kMaxSnapshotBytes;
                 if (!both_fit) {
                     ev.ir_before.clear();
                     afterSnap.clear();
+                    // Remove orphaned before file written in BEFORE stage (H5 fix)
+                    std::string prefix = "pass_" + std::to_string(current_event_id) + "_";
+                    std::string dir = g_output_dir + "/ir";
+                    std::error_code ec_iter;
+                    for (auto &entry : fs::directory_iterator(dir, ec_iter)) {
+                        if (ec_iter) break;
+                        std::string fname = entry.path().filename().string();
+                        if (fname.rfind(prefix, 0) == 0 && fname.find("_before.ll") != std::string::npos) {
+                            std::error_code ec_rm;
+                            fs::remove(entry.path(), ec_rm);
+                        }
+                    }
                 }
                 ev.ir_after = std::move(afterSnap);
             }
@@ -282,9 +393,8 @@ int main(int argc, char **argv) {
                 errs() << "  (no change)\n";
             }
 
-            // IR snapshot (after) — only when the pass actually changed IR,
-            // consistent with the JSON output (which drops unchanged IR).
-            if (shouldSnapshot(PassID) && changes)
+            // IR snapshot (after) — gated by same joint cap as JSON
+            if (shouldSnapshot(PassID) && changes && both_fit)
                 saveIRSnapshot("after", IR, PassID.str(), current_event_id);
         });
 
@@ -295,23 +405,24 @@ int main(int argc, char **argv) {
                 return;
             }
 
-            // INVALIDATED has no IR argument, so match by pass name. If the
-            // name appears on multiple frames (same pass nested at different
-            // depths), warn and still pop the topmost — LIFO invalidation is
-            // the observed LLVM behavior, but the ambiguity is surfaced.
-            auto name_matches = std::count_if(pass_stack.begin(), pass_stack.end(),
-                [&](const PassFrame &f) { return f.pass_name == PassID.str(); });
-            if (name_matches > 1) {
-                errs() << "  WARNING: INVALIDATED: " << name_matches
-                       << " frames named '" << PassID
-                       << "' on stack; popping topmost (LIFO assumption)\n";
-            }
+            // INVALIDATED has no IR argument — must match by name only (LIFO).
+            // Stack discipline requires popping the most-recent matching name;
+            // heuristic scoring without IR is unsound and was removed (H1 fix).
             auto it = std::find_if(pass_stack.rbegin(), pass_stack.rend(),
                 [&](const PassFrame &f) { return f.pass_name == PassID.str(); });
 
             if (it == pass_stack.rend()) {
                 errs() << "  WARNING: INVALIDATED callback: no matching BEFORE frame for " << PassID << "\n";
                 return;
+            }
+
+            // Check for ambiguity — LIFO assumption documented in DATA_FLOW.md
+            auto name_matches = std::count_if(pass_stack.begin(), pass_stack.end(),
+                [&](const PassFrame &f) { return f.pass_name == PassID.str(); });
+            if (name_matches > 1) {
+                errs() << "  WARNING: INVALIDATED: " << name_matches
+                       << " frames named '" << PassID
+                       << "' on stack; popping topmost (LIFO assumption)\n";
             }
 
             PassFrame frame = std::move(*it);
@@ -335,7 +446,7 @@ int main(int argc, char **argv) {
                    << "  (no after-state available)\n";
         });
 
-    // ============================================================
+// ============================================================
     // Initialize native target so TargetRegistry::lookupTarget works.
     // Uses LLVM_NATIVE_TARGET macros which resolve to the linked
     // target backend (e.g. x86) at compile time.
@@ -345,6 +456,20 @@ int main(int argc, char **argv) {
     LLVM_NATIVE_TARGETMC();
     LLVM_NATIVE_ASMPARSER();
     LLVM_NATIVE_ASMPRINTER();
+
+    // ============================================================
+    // Initialize additional targets for cross-target codegen via llc/TargetRegistry.
+    // Only initialize targets that are linked into this build (see CMakeLists.txt).
+    // ============================================================
+    LLVMInitializeAArch64TargetInfo();
+    LLVMInitializeAArch64Target();
+    LLVMInitializeAArch64TargetMC();
+    LLVMInitializeAArch64AsmPrinter();
+
+    LLVMInitializeRISCVTargetInfo();
+    LLVMInitializeRISCVTarget();
+    LLVMInitializeRISCVTargetMC();
+    LLVMInitializeRISCVAsmPrinter();
 
     // ============================================================
     // Create TargetMachine
@@ -439,7 +564,14 @@ int main(int argc, char **argv) {
 
     // Measure codegen impact
     errs() << "Measuring codegen impact...\n";
-    CodegenResult cg = measureCodegen(ir_before_path, ir_after_path, g_output_dir);
+    MultiTargetConfig mt_config;
+    mt_config.targets = g_target_triples;
+    CodegenResult cg;
+    if (g_target_triples.empty()) {
+        cg = measureCodegen(ir_before_path, ir_after_path, g_output_dir);
+    } else {
+        cg = measureCodegenMultiTarget(ir_before_path, ir_after_path, g_output_dir, mt_config);
+    }
 
     // Summary
     errs() << "\n=================================\n";

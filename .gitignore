@@ -6,9 +6,10 @@ clang+llvm-*/
 llvm.tar.xz
 
 # Generated reports (output from running LPTA)
-report/
-report_real/
-report_test/
+report*/
+report_*/
+test_report*/
+test_for_change_feature/
 
 # Generated assembly files
 *.s
@@ -24,11 +25,15 @@ ir_after_opt.ll
 
 # Generated test outputs
 tests/edge_cases/results/
+tests/edge_cases/*.ll
+!tests/edge_cases/ir/
 tests/judge_demo/demo_output/
 tests/judge_demo/output/
 tests/correctness_report.txt
 tests/test_report.txt
 tests/fuzz_results.log
+test_history_empty_tmp.json
+test_output.txt
 
 # Generated Doxygen output (sources in docs/ are tracked)
 docs/doxygen/
@@ -42,10 +47,18 @@ docs/doxygen/
 *~
 
 # Personal / session-local files (never publish)
-AGENTS.md
 AMD_Prep_*.md
 *Prep*.md
 *prep*.md
+
+# Secrets (API keys live in the environment, never in files)
+.env
+*.key
+.lpta_config.json
+
+# Python artifacts
+__pycache__/
+*.pyc
 
 # OS
 .DS_Store

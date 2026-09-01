@@ -11,4 +11,7 @@ llvm::OptimizationLevel g_opt = llvm::OptimizationLevel::O2;
 std::vector<std::string> g_optnone_functions;
 bool g_optnone_detected = false;
 
+// Multi-target codegen
+std::vector<std::string> g_target_triples;
+
 // Pass tracking globals are defined in Tracker.cpp

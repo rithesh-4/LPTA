@@ -20,3 +20,8 @@ extern llvm::OptimizationLevel g_opt;
 // ============================================================
 extern std::vector<std::string> g_optnone_functions;
 extern bool g_optnone_detected;
+
+// ============================================================
+// Multi-target codegen
+// ============================================================
+extern std::vector<std::string> g_target_triples;

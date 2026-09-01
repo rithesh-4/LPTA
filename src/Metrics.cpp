@@ -30,7 +30,10 @@ IRMetrics captureModuleMetrics(const Module &M) {
                     break;
                 case Instruction::Load: m.load_count++; break;
                 case Instruction::Store: m.store_count++; break;
-                case Instruction::Br: m.branch_count++; break;
+                case Instruction::Br:
+                case Instruction::Switch:
+                case Instruction::IndirectBr:
+                    m.branch_count++; break;
                 case Instruction::PHI: m.phi_count++; break;
                 case Instruction::Ret: m.return_count++; break;
                 default: break;
@@ -61,13 +64,20 @@ IRMetrics captureFunctionMetrics(const Function &F) {
                 m.call_count++; break;
             case Instruction::Load: m.load_count++; break;
             case Instruction::Store: m.store_count++; break;
-            case Instruction::Br: m.branch_count++; break;
+            case Instruction::Br:
+            case Instruction::Switch:
+            case Instruction::IndirectBr:
+                m.branch_count++; break;
             case Instruction::PHI: m.phi_count++; break;
             case Instruction::Ret: m.return_count++; break;
             default: break;
             }
         }
     }
+    assert(m.instruction_count >= m.call_count + m.load_count + m.store_count &&
+           "call/load/store counts must be <= instruction count");
+    assert(m.basic_block_count >= m.return_count &&
+           "return count must be <= basic block count");
     return m;
 }
 
@@ -84,13 +94,20 @@ IRMetrics captureLoopMetrics(const Loop &L) {
                 m.call_count++; break;
             case Instruction::Load: m.load_count++; break;
             case Instruction::Store: m.store_count++; break;
-            case Instruction::Br: m.branch_count++; break;
+            case Instruction::Br:
+            case Instruction::Switch:
+            case Instruction::IndirectBr:
+                m.branch_count++; break;
             case Instruction::PHI: m.phi_count++; break;
             case Instruction::Ret: m.return_count++; break;
             default: break;
             }
         }
     }
+    assert(m.instruction_count >= m.call_count + m.load_count + m.store_count &&
+           "call/load/store counts must be <= instruction count");
+    assert(m.basic_block_count >= m.return_count &&
+           "return count must be <= basic block count");
     return m;
 }
 
