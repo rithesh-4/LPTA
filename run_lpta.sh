@@ -1,6 +1,6 @@
 #!/bin/bash
 # LPTA - Build and Run Script
-# Usage: bash run_lpta.sh [input.ll] [--snapshots]
+# Usage: bash run_lpta.sh [input.ll] [report_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=...]
 #
 # Environment variables:
 #   LLVM_DIR   - Path to LLVM installation (REQUIRED if not auto-detectable)
@@ -30,14 +30,44 @@ if [ -z "$LLVM_DIR" ] || [ ! -d "$LLVM_DIR/lib/cmake/llvm" ]; then
 fi
 
 BUILD_DIR="${BUILD_DIR:-./build}"
-REPORT_DIR="${REPORT_DIR:-./report}"
-INPUT="${1:-./test.ll}"
+REPORT_DIR_DEFAULT="${REPORT_DIR:-./report}"
+INPUT=""
+REPORT_POS=""
+OPT_LEVEL=""
 SNAPSHOTS=""
+TARGETS=""
 for arg in "$@"; do
-  if [ "$arg" = "--snapshots" ]; then
-    SNAPSHOTS="--snapshots"
-  fi
+  case "$arg" in
+    --snapshots) SNAPSHOTS="--snapshots" ;;
+    --targets=*) TARGETS="$arg" ;;
+    -O0|-O1|-O2|-O3|-Os|-Oz) OPT_LEVEL="$arg" ;;
+    -*) echo "ERROR: unknown flag '$arg'"; exit 1 ;;
+    *)
+      if [ -z "$INPUT" ]; then
+        INPUT="$arg"
+      elif [ -z "$REPORT_POS" ]; then
+        REPORT_POS="$arg"
+      else
+        echo "ERROR: unexpected argument '$arg'"
+        exit 1
+      fi
+      ;;
+  esac
 done
+INPUT="${INPUT:-./test.ll}"
+REPORT_DIR="${REPORT_POS:-$REPORT_DIR_DEFAULT}"
+
+# Resolve to absolute paths BEFORE cd'ing into BUILD_DIR (relative
+# inputs like test.ll would otherwise resolve inside build/)
+ROOT="$(pwd)"
+case "$INPUT" in
+  /*|[A-Za-z]:*) ;;
+  *) INPUT="$ROOT/$INPUT" ;;
+esac
+case "$REPORT_DIR" in
+  /*|[A-Za-z]:*) ;;
+  *) REPORT_DIR="$ROOT/$REPORT_DIR" ;;
+esac
 
 echo "=== LPTA Build & Run ==="
 echo "  LLVM: $LLVM_DIR"
@@ -60,7 +90,7 @@ echo "  Build OK"
 # Run
 echo "[2/3] Running LPTA on $INPUT..."
 mkdir -p "$REPORT_DIR"
-./lpta_test "$INPUT" "$REPORT_DIR" $SNAPSHOTS 2>&1 | grep -E "^(===|\[|  |Wrote|Module:|Pipeline:|Output:|  Using)" | head -40
+./lpta_test "$INPUT" "$REPORT_DIR" $OPT_LEVEL $SNAPSHOTS $TARGETS 2>&1 | grep -E "^(===|\[|  |Wrote|Module:|Pipeline:|Output:|  Using)" | head -40
 echo ""
 
 # Copy dashboard

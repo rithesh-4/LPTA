@@ -10,6 +10,7 @@ report*/
 report_*/
 test_report*/
 test_for_change_feature/
+demo_*/
 
 # Generated assembly files
 *.s
@@ -45,11 +46,6 @@ docs/doxygen/
 *.swp
 *.swo
 *~
-
-# Personal / session-local files (never publish)
-AMD_Prep_*.md
-*Prep*.md
-*prep*.md
 
 # Secrets (API keys live in the environment, never in files)
 .env
