@@ -58,8 +58,11 @@ INPUT="${INPUT:-./test.ll}"
 REPORT_DIR="${REPORT_POS:-$REPORT_DIR_DEFAULT}"
 
 # Resolve to absolute paths BEFORE cd'ing into BUILD_DIR (relative
-# inputs like test.ll would otherwise resolve inside build/)
+# inputs like test.ll would otherwise resolve inside build/).
+# SCRIPT_DIR must also be captured here — after cd, $0's directory
+# would resolve inside build/ and the dashboard copy would fail.
 ROOT="$(pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 case "$INPUT" in
   /*|[A-Za-z]:*) ;;
   *) INPUT="$ROOT/$INPUT" ;;
@@ -67,6 +70,10 @@ esac
 case "$REPORT_DIR" in
   /*|[A-Za-z]:*) ;;
   *) REPORT_DIR="$ROOT/$REPORT_DIR" ;;
+esac
+case "$BUILD_DIR" in
+  /*|[A-Za-z]:*) ;;
+  *) BUILD_DIR="$ROOT/$BUILD_DIR" ;;
 esac
 
 echo "=== LPTA Build & Run ==="
@@ -94,7 +101,6 @@ mkdir -p "$REPORT_DIR"
 echo ""
 
 # Copy dashboard
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo "[3/3] Dashboard ready at: $REPORT_DIR/index.html"
 cp "$SCRIPT_DIR/dashboard.html" "$REPORT_DIR/index.html"
 
@@ -104,7 +110,6 @@ echo "  JSON:   $REPORT_DIR/history.json"
 echo "  HTML:   $REPORT_DIR/index.html"
 echo ""
 echo "  Open dashboard:"
-echo "    cd $REPORT_DIR"
-echo "    python ../serve_dashboard.py . -p 8080   (or: python -m http.server 8080)"
+echo "    python \"$SCRIPT_DIR/serve_dashboard.py\" \"$REPORT_DIR\" -p 8080"
 echo "    Then open http://localhost:8080"
 echo ""
