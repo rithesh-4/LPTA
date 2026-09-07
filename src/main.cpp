@@ -40,10 +40,550 @@
 #include <cstdio>
 #include <cctype>
 
+#include <map>
+#include <tuple>
+
 using namespace llvm;
 namespace fs = std::filesystem;
 
 // Globals are defined in globals.cpp (shared with test_utilities).
+
+
+// ============================================================
+// --compare CLI mode
+// ============================================================
+
+struct CompareEvent {
+    unsigned id = 0;
+    std::string event_type;
+    std::string pass_name;
+    bool has_changes = false;
+    unsigned instr_before = 0, instr_after = 0;
+    unsigned bb_before = 0, bb_after = 0;
+    unsigned load_before = 0, load_after = 0;
+    unsigned store_before = 0, store_after = 0;
+    unsigned branch_before = 0, branch_after = 0;
+    unsigned phi_before = 0, phi_after = 0;
+};
+
+static std::string trimWS(const std::string &s) {
+    auto a = s.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos) return "";
+    auto b = s.find_last_not_of(" \t\r\n");
+    return s.substr(a, b - a + 1);
+}
+
+static int parseJsonInt(const std::string &line, const std::string &key) {
+    auto pos = line.find("\"" + key + "\"");
+    if (pos == std::string::npos) return 0;
+    pos = line.find(':', pos);
+    if (pos == std::string::npos) return 0;
+    auto val = line.find_first_not_of(" \t", pos + 1);
+    if (val == std::string::npos) return 0;
+    auto end = line.find_first_of(",\n\r", val);
+    std::string num = trimWS(line.substr(val, end == std::string::npos ? std::string::npos : end - val));
+    // Handle null
+    if (num == "null" || num == "true" || num == "false") return 0;
+    try { return std::stoi(num); } catch (...) { return 0; }
+}
+
+static std::string parseJsonString(const std::string &line, const std::string &key) {
+    auto pos = line.find("\"" + key + "\"");
+    if (pos == std::string::npos) return "";
+    pos = line.find(':', pos);
+    if (pos == std::string::npos) return "";
+    auto q1 = line.find('"', pos + 1);
+    if (q1 == std::string::npos) return "";
+    auto q2 = line.find('"', q1 + 1);
+    if (q2 == std::string::npos) return "";
+    return line.substr(q1 + 1, q2 - q1 - 1);
+}
+
+static bool parseJsonBool(const std::string &line, const std::string &key) {
+    auto pos = line.find("\"" + key + "\"");
+    if (pos == std::string::npos) return false;
+    pos = line.find(':', pos);
+    if (pos == std::string::npos) return false;
+    auto val = line.find_first_not_of(" \t", pos + 1);
+    if (val == std::string::npos) return false;
+    return line.compare(val, 4, "true") == 0;
+}
+
+static long long pctDelta(long long old_val, long long new_val) {
+    if (old_val == 0) return (new_val == 0) ? 0 : 100;
+    return ((new_val - old_val) * 100) / old_val;
+}
+
+static int compareJsonFiles(const std::string &basePath, const std::string &currPath) {
+    // --- Read and parse baseline ---
+    std::ifstream baseFile(basePath);
+    if (!baseFile.is_open()) {
+        errs() << "ERROR: cannot open baseline file '" << basePath << "'\n";
+        return 1;
+    }
+
+    std::string line;
+    std::string basePipeline, baseModule;
+    long long baseInstrBefore = 0, baseInstrAfter = 0;
+    long long baseBbBefore = 0, baseBbAfter = 0;
+    long long baseCgLinesBefore = 0, baseCgLinesAfter = 0;
+    std::vector<CompareEvent> baseEvents;
+
+    {
+        bool inEvents = false;
+        bool inMetricsBefore = false, inMetricsAfter = false;
+        CompareEvent ev;
+        while (std::getline(baseFile, line)) {
+            if (!inEvents) {
+                // Top-level fields
+                auto s = parseJsonString(line, "pipeline");
+                if (!s.empty()) basePipeline = s;
+                s = parseJsonString(line, "module_name");
+                if (!s.empty()) baseModule = s;
+                // Summary fields
+                auto v = parseJsonInt(line, "total_instructions_before");
+                if (v) baseInstrBefore = v;
+                v = parseJsonInt(line, "total_instructions_after");
+                if (v) baseInstrAfter = v;
+                v = parseJsonInt(line, "total_bbs_before");
+                if (v) baseBbBefore = v;
+                v = parseJsonInt(line, "total_bbs_after");
+                if (v) baseBbAfter = v;
+                v = parseJsonInt(line, "codegen_asm_lines_before");
+                if (v) baseCgLinesBefore = v;
+                v = parseJsonInt(line, "codegen_asm_lines_after");
+                if (v) baseCgLinesAfter = v;
+
+                if (line.find("\"events\"") != std::string::npos && line.find('[') != std::string::npos) {
+                    inEvents = true;
+                }
+            } else {
+                // Inside events array
+                if (line.find("\"event_type\"") != std::string::npos) {
+                    auto s = parseJsonString(line, "event_type");
+                    if (!s.empty()) {
+                        ev = CompareEvent();
+                        ev.event_type = s;
+                    }
+                }
+                if (line.find("\"id\"") != std::string::npos) {
+                    ev.id = (unsigned)parseJsonInt(line, "id");
+                }
+                if (line.find("\"pass_name\"") != std::string::npos) {
+                    auto s = parseJsonString(line, "pass_name");
+                    if (!s.empty()) ev.pass_name = s;
+                }
+                if (line.find("\"has_changes\"") != std::string::npos) {
+                    ev.has_changes = parseJsonBool(line, "has_changes");
+                }
+
+                // Detect metrics_before / metrics_after blocks
+                if (line.find("\"metrics_before\"") != std::string::npos) inMetricsBefore = true;
+                if (line.find("\"metrics_after\"") != std::string::npos) { inMetricsAfter = true; inMetricsBefore = false; }
+
+                if (inMetricsBefore || inMetricsAfter) {
+                    auto iv = parseJsonInt(line, "instruction_count");
+                    auto bb = parseJsonInt(line, "basic_block_count");
+                    auto ld = parseJsonInt(line, "load_count");
+                    auto st = parseJsonInt(line, "store_count");
+                    auto br = parseJsonInt(line, "branch_count");
+                    auto ph = parseJsonInt(line, "phi_count");
+                    if (iv || bb || ld || st || br || ph) {
+                        if (inMetricsBefore) {
+                            ev.instr_before = iv; ev.bb_before = bb; ev.load_before = ld;
+                            ev.store_before = st; ev.branch_before = br; ev.phi_before = ph;
+                        } else {
+                            ev.instr_after = iv; ev.bb_after = bb; ev.load_after = ld;
+                            ev.store_after = st; ev.branch_after = br; ev.phi_after = ph;
+                        }
+                    }
+                }
+
+                // End of event object
+                if (line.find("},") != std::string::npos || line.find("}\n") != std::string::npos) {
+                    if (inMetricsBefore || inMetricsAfter) {
+                        inMetricsBefore = false;
+                        inMetricsAfter = false;
+                    } else if (!ev.event_type.empty()) {
+                        baseEvents.push_back(ev);
+                        ev = CompareEvent();
+                    }
+                }
+
+                // End of events array
+                if (line.find("],") != std::string::npos && inEvents) {
+                    inEvents = false;
+                }
+            }
+        }
+    }
+
+    // --- Read and parse current ---
+    std::ifstream currFile(currPath);
+    if (!currFile.is_open()) {
+        errs() << "ERROR: cannot open current file '" << currPath << "'\n";
+        return 1;
+    }
+
+    std::string currPipeline, currModule;
+    long long currInstrBefore = 0, currInstrAfter = 0;
+    long long currBbBefore = 0, currBbAfter = 0;
+    long long currCgLinesBefore = 0, currCgLinesAfter = 0;
+    std::vector<CompareEvent> currEvents;
+
+    {
+        bool inEvents = false;
+        bool inMetricsBefore = false, inMetricsAfter = false;
+        CompareEvent ev;
+        while (std::getline(currFile, line)) {
+            if (!inEvents) {
+                auto s = parseJsonString(line, "pipeline");
+                if (!s.empty()) currPipeline = s;
+                s = parseJsonString(line, "module_name");
+                if (!s.empty()) currModule = s;
+                auto v = parseJsonInt(line, "total_instructions_before");
+                if (v) currInstrBefore = v;
+                v = parseJsonInt(line, "total_instructions_after");
+                if (v) currInstrAfter = v;
+                v = parseJsonInt(line, "total_bbs_before");
+                if (v) currBbBefore = v;
+                v = parseJsonInt(line, "total_bbs_after");
+                if (v) currBbAfter = v;
+                v = parseJsonInt(line, "codegen_asm_lines_before");
+                if (v) currCgLinesBefore = v;
+                v = parseJsonInt(line, "codegen_asm_lines_after");
+                if (v) currCgLinesAfter = v;
+
+                if (line.find("\"events\"") != std::string::npos && line.find('[') != std::string::npos) {
+                    inEvents = true;
+                }
+            } else {
+                if (line.find("\"event_type\"") != std::string::npos) {
+                    auto s = parseJsonString(line, "event_type");
+                    if (!s.empty()) {
+                        ev = CompareEvent();
+                        ev.event_type = s;
+                    }
+                }
+                if (line.find("\"id\"") != std::string::npos) {
+                    ev.id = (unsigned)parseJsonInt(line, "id");
+                }
+                if (line.find("\"pass_name\"") != std::string::npos) {
+                    auto s = parseJsonString(line, "pass_name");
+                    if (!s.empty()) ev.pass_name = s;
+                }
+                if (line.find("\"has_changes\"") != std::string::npos) {
+                    ev.has_changes = parseJsonBool(line, "has_changes");
+                }
+                if (line.find("\"metrics_before\"") != std::string::npos) inMetricsBefore = true;
+                if (line.find("\"metrics_after\"") != std::string::npos) { inMetricsAfter = true; inMetricsBefore = false; }
+                if (inMetricsBefore || inMetricsAfter) {
+                    auto iv = parseJsonInt(line, "instruction_count");
+                    auto bb = parseJsonInt(line, "basic_block_count");
+                    auto ld = parseJsonInt(line, "load_count");
+                    auto st = parseJsonInt(line, "store_count");
+                    auto br = parseJsonInt(line, "branch_count");
+                    auto ph = parseJsonInt(line, "phi_count");
+                    if (iv || bb || ld || st || br || ph) {
+                        if (inMetricsBefore) {
+                            ev.instr_before = iv; ev.bb_before = bb; ev.load_before = ld;
+                            ev.store_before = st; ev.branch_before = br; ev.phi_before = ph;
+                        } else {
+                            ev.instr_after = iv; ev.bb_after = bb; ev.load_after = ld;
+                            ev.store_after = st; ev.branch_after = br; ev.phi_after = ph;
+                        }
+                    }
+                }
+                if (line.find("},") != std::string::npos || line.find("}\n") != std::string::npos) {
+                    if (inMetricsBefore || inMetricsAfter) {
+                        inMetricsBefore = false;
+                        inMetricsAfter = false;
+                    } else if (!ev.event_type.empty()) {
+                        currEvents.push_back(ev);
+                        ev = CompareEvent();
+                    }
+                }
+                if (line.find("],") != std::string::npos && inEvents) {
+                    inEvents = false;
+                }
+            }
+        }
+    }
+
+    // ============================================================
+    // Compute comparison
+    // ============================================================
+    struct Finding {
+        std::string severity;  // "high", "medium", "positive", "info"
+        std::string type;
+        std::string message;
+        std::string pass_name;
+    };
+
+    std::vector<Finding> regressions;
+    std::vector<Finding> improvements;
+
+    // 1. Instruction count regression/improvement
+    if (baseInstrAfter > 0) {
+        long long ip = pctDelta(baseInstrAfter, currInstrAfter);
+        if (ip > 5) {
+            regressions.push_back({"high", "instruction_increase",
+                "Instruction count increased by " + std::to_string(ip) + "% vs baseline ("
+                + std::to_string(baseInstrAfter) + " -> " + std::to_string(currInstrAfter) + ")", ""});
+        } else if (ip < -5) {
+            improvements.push_back({"positive", "instruction_reduction",
+                "Instruction count reduced by " + std::to_string(-ip) + "% vs baseline ("
+                + std::to_string(baseInstrAfter) + " -> " + std::to_string(currInstrAfter) + ")", ""});
+        }
+    }
+
+    // 2. Codegen regression/improvement
+    if (baseCgLinesAfter > 0) {
+        long long cp = pctDelta(baseCgLinesAfter, currCgLinesAfter);
+        if (cp > 5) {
+            regressions.push_back({"high", "codegen_regression",
+                "Codegen assembly lines increased by " + std::to_string(cp) + "% vs baseline ("
+                + std::to_string(baseCgLinesAfter) + " -> " + std::to_string(currCgLinesAfter) + ")", ""});
+        } else if (cp < -5) {
+            improvements.push_back({"positive", "codegen_improvement",
+                "Codegen assembly lines reduced by " + std::to_string(-cp) + "% vs baseline ("
+                + std::to_string(baseCgLinesAfter) + " -> " + std::to_string(currCgLinesAfter) + ")", ""});
+        }
+    }
+
+    // 3. Pass-level comparison
+    // Aggregate deltas per pass name from after-events with changes
+    struct PassAgg {
+        unsigned count = 0;
+        long long instr_delta = 0, bb_delta = 0, load_delta = 0, store_delta = 0;
+    };
+    std::map<std::string, PassAgg> basePasses, currPasses;
+
+    for (auto &e : baseEvents) {
+        if (e.event_type == "after" && e.has_changes) {
+            auto &a = basePasses[e.pass_name];
+            a.count++;
+            a.instr_delta += (long long)e.instr_after - (long long)e.instr_before;
+            a.bb_delta += (long long)e.bb_after - (long long)e.bb_before;
+            a.load_delta += (long long)e.load_after - (long long)e.load_before;
+            a.store_delta += (long long)e.store_after - (long long)e.store_before;
+        }
+    }
+    for (auto &e : currEvents) {
+        if (e.event_type == "after" && e.has_changes) {
+            auto &a = currPasses[e.pass_name];
+            a.count++;
+            a.instr_delta += (long long)e.instr_after - (long long)e.instr_before;
+            a.bb_delta += (long long)e.bb_after - (long long)e.bb_before;
+            a.load_delta += (long long)e.load_after - (long long)e.load_before;
+            a.store_delta += (long long)e.store_after - (long long)e.store_before;
+        }
+    }
+
+    // Collect all pass names
+    std::set<std::string> allPassNames;
+    for (auto &kv : basePasses) allPassNames.insert(kv.first);
+    for (auto &kv : currPasses) allPassNames.insert(kv.first);
+
+    // Detect new/removed passes
+    std::vector<std::string> newPasses, removedPasses;
+    for (auto &pn : allPassNames) {
+        if (basePasses.find(pn) == basePasses.end() && currPasses.find(pn) != currPasses.end())
+            newPasses.push_back(pn);
+        else if (basePasses.find(pn) != basePasses.end() && currPasses.find(pn) == currPasses.end())
+            removedPasses.push_back(pn);
+    }
+
+    for (auto &pn : allPassNames) {
+        auto bp_it = basePasses.find(pn);
+        auto cp_it = currPasses.find(pn);
+        PassAgg bp = (bp_it != basePasses.end()) ? bp_it->second : PassAgg{};
+        PassAgg cp = (cp_it != currPasses.end()) ? cp_it->second : PassAgg{};
+
+        if (baseInstrAfter > 0) {
+            long long idd = cp.instr_delta - bp.instr_delta;
+            long long ip = (idd * 100) / baseInstrAfter;
+            if (ip > 5) {
+                regressions.push_back({"medium", "pass_regression",
+                    pn + " instruction delta worsened by " + std::to_string(ip)
+                    + "% (" + std::to_string(bp.instr_delta) + " -> " + std::to_string(cp.instr_delta) + ")",
+                    pn});
+            } else if (ip < -5) {
+                improvements.push_back({"positive", "pass_improvement",
+                    pn + " instruction delta improved by " + std::to_string(-ip)
+                    + "% (" + std::to_string(bp.instr_delta) + " -> " + std::to_string(cp.instr_delta) + ")",
+                    pn});
+            }
+        }
+
+        // Load/store delta detection
+        long long loadIdd = cp.load_delta - bp.load_delta;
+        if (loadIdd > 5) {
+            regressions.push_back({"medium", "pass_regression",
+                pn + " load count delta increased by " + std::to_string(loadIdd), pn});
+        } else if (loadIdd < -5) {
+            improvements.push_back({"positive", "pass_improvement",
+                pn + " load count delta decreased by " + std::to_string(-loadIdd), pn});
+        }
+        long long storeIdd = cp.store_delta - bp.store_delta;
+        if (storeIdd > 5) {
+            regressions.push_back({"medium", "pass_regression",
+                pn + " store count delta increased by " + std::to_string(storeIdd), pn});
+        } else if (storeIdd < -5) {
+            improvements.push_back({"positive", "pass_improvement",
+                pn + " store count delta decreased by " + std::to_string(-storeIdd), pn});
+        }
+    }
+
+    // New/removed pass findings
+    if (!newPasses.empty()) {
+        std::string names;
+        for (size_t i = 0; i < newPasses.size() && i < 5; i++) {
+            if (i) names += ", ";
+            names += newPasses[i];
+        }
+        if (newPasses.size() > 5) names += ", ...";
+        regressions.push_back({"info", "new_passes",
+            std::to_string(newPasses.size()) + " new pass(es) appeared in current run: " + names, ""});
+    }
+    if (!removedPasses.empty()) {
+        std::string names;
+        for (size_t i = 0; i < removedPasses.size() && i < 5; i++) {
+            if (i) names += ", ";
+            names += removedPasses[i];
+        }
+        if (removedPasses.size() > 5) names += ", ...";
+        improvements.push_back({"info", "removed_passes",
+            std::to_string(removedPasses.size()) + " pass(es) removed from current run: " + names, ""});
+    }
+
+    // ============================================================
+    // Overall regression score (0-100)
+    // ============================================================
+    double score = 0;
+    if (baseInstrAfter > 0) {
+        long long ip = pctDelta(baseInstrAfter, currInstrAfter);
+        score += std::max(0.0, std::min(100.0, 50.0 + ip)) * 0.4;
+    }
+    if (baseCgLinesAfter > 0) {
+        long long cp = pctDelta(baseCgLinesAfter, currCgLinesAfter);
+        score += std::max(0.0, std::min(100.0, 50.0 + cp)) * 0.3;
+    }
+    {
+        int highReg = 0, medReg = 0, highImp = 0;
+        for (auto &r : regressions) {
+            if (r.severity == "high") highReg++;
+            else if (r.severity == "medium") medReg++;
+        }
+        for (auto &i : improvements) {
+            if (i.severity == "positive") highImp++;
+        }
+        score += std::min(30.0, highReg * 15.0 + medReg * 5.0) * 0.2;
+        score -= std::min(20.0, highImp * 10.0) * 0.1;
+    }
+    int regressionScore = std::max(0, std::min(100, (int)score));
+
+    // Sort: high severity first, then medium, then info/positive
+    auto sevOrd = [](const std::string &s) -> int {
+        if (s == "high") return 0;
+        if (s == "medium") return 1;
+        if (s == "info") return 2;
+        if (s == "positive") return 0;
+        return 3;
+    };
+    std::sort(regressions.begin(), regressions.end(),
+        [&](const Finding &a, const Finding &b) { return sevOrd(a.severity) < sevOrd(b.severity); });
+    std::sort(improvements.begin(), improvements.end(),
+        [&](const Finding &a, const Finding &b) { return sevOrd(a.severity) < sevOrd(b.severity); });
+
+    // ============================================================
+    // Print report
+    // ============================================================
+    errs() << "\n";
+    errs() << "=====================================================\n";
+    errs() << "  LPTA Cross-Run Comparison\n";
+    errs() << "=====================================================\n";
+    errs() << "\n";
+    errs() << "  Baseline: " << baseModule << " (" << basePipeline << ")\n";
+    errs() << "  Current:  " << currModule << " (" << currPipeline << ")\n";
+    errs() << "\n";
+
+    errs() << "  Regression Score: " << regressionScore << "/100";
+    if (regressionScore <= 10) errs() << "  [IMPROVED]";
+    else if (regressionScore <= 30) errs() << "  [MIXED]";
+    else if (regressionScore <= 60) errs() << "  [MIXED]";
+    else errs() << "  [REGRESSED]";
+    errs() << "\n\n";
+
+    errs() << "--- Summary ---\n";
+    errs() << "  Instructions (before): " << baseInstrBefore << " -> " << currInstrBefore << "\n";
+    errs() << "  Instructions (after):  " << baseInstrAfter << " -> " << currInstrAfter << "\n";
+    if (baseInstrAfter > 0) {
+        long long baseRed = baseInstrBefore - baseInstrAfter;
+        long long currRed = currInstrBefore - currInstrAfter;
+        long long redDelta = currRed - baseRed;
+        errs() << "  Instruction reduction: " << baseRed << " -> " << currRed
+               << " (delta: " << (redDelta >= 0 ? "+" : "") << redDelta << ")\n";
+    }
+    errs() << "  Codegen lines (after): " << baseCgLinesAfter << " -> " << currCgLinesAfter << "\n";
+    errs() << "\n";
+
+    errs() << "--- Findings ---\n\n";
+
+    if (regressions.empty() && improvements.empty()) {
+        errs() << "  No significant differences found.\n\n";
+    }
+
+    if (!regressions.empty()) {
+        errs() << "  Regressions (" << regressions.size() << "):\n";
+        for (auto &r : regressions) {
+            const char *icon = (r.severity == "high") ? "[HIGH]  " :
+                               (r.severity == "medium") ? "[MED]   " : "[INFO]  ";
+            errs() << "    " << icon << r.message << "\n";
+            if (!r.pass_name.empty())
+                errs() << "           Pass: " << r.pass_name << "\n";
+        }
+        errs() << "\n";
+    }
+
+    if (!improvements.empty()) {
+        errs() << "  Improvements (" << improvements.size() << "):\n";
+        for (auto &i : improvements) {
+            const char *icon = (i.severity == "positive") ? "[+]     " : "[INFO]  ";
+            errs() << "    " << icon << i.message << "\n";
+            if (!i.pass_name.empty())
+                errs() << "           Pass: " << i.pass_name << "\n";
+        }
+        errs() << "\n";
+    }
+
+    if (!newPasses.empty()) {
+        errs() << "  New passes (" << newPasses.size() << "): ";
+        for (size_t i = 0; i < newPasses.size(); i++) {
+            if (i) errs() << ", ";
+            errs() << newPasses[i];
+        }
+        errs() << "\n";
+    }
+    if (!removedPasses.empty()) {
+        errs() << "  Removed passes (" << removedPasses.size() << "): ";
+        for (size_t i = 0; i < removedPasses.size(); i++) {
+            if (i) errs() << ", ";
+            errs() << removedPasses[i];
+        }
+        errs() << "\n";
+    }
+
+    errs() << "\n=====================================================\n";
+    errs() << "  Verdict: ";
+    if (regressionScore <= 10) errs() << "Consistent improvements across instructions, codegen, and pass behavior.";
+    else if (regressionScore <= 30) errs() << "Mostly improvements with minor variations.";
+    else if (regressionScore <= 60) errs() << "Mixed results -- some areas improved, others regressed.";
+    else errs() << "Significant regressions that may warrant investigation.";
+    errs() << "\n=====================================================\n\n";
+
+    return (regressionScore > 60) ? 1 : 0;
+}
 
 // ============================================================
 // Main
@@ -51,8 +591,25 @@ namespace fs = std::filesystem;
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n";
+        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n       lpta_test --compare <base.json> <curr.json>\n";
         return 1;
+    }
+
+    // Check for --compare mode (standalone, no LLVM pipeline)
+    {
+        std::vector<std::string> args;
+        for (int i = 1; i < argc; i++) args.push_back(argv[i]);
+        for (size_t i = 0; i < args.size(); i++) {
+            if (args[i] == "--compare") {
+                if (i + 2 >= args.size()) {
+                    errs() << "ERROR: --compare requires two arguments: <base.json> <curr.json>\n";
+                    return 1;
+                }
+                std::string base = args[i + 1];
+                std::string curr = args[i + 2];
+                return compareJsonFiles(base, curr);
+            }
+        }
     }
 
     // Parse CLI
@@ -137,7 +694,7 @@ int main(int argc, char **argv) {
             g_opt = OptimizationLevel::Oz; g_opt_level = "Oz";
         } else if (!arg.empty() && arg[0] == '-') {
             errs() << "ERROR: unknown option '" << arg << "'\n";
-            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n";
+            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n       lpta_test --compare <base.json> <curr.json>\n";
             return 1;
         } else if (input_file.empty()) {
             input_file = arg;
@@ -146,13 +703,13 @@ int main(int argc, char **argv) {
             output_dir_set = true;
         } else {
             errs() << "ERROR: unexpected argument '" << arg << "'\n";
-            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n";
+            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n       lpta_test --compare <base.json> <curr.json>\n";
             return 1;
         }
     }
 
     if (input_file.empty()) {
-        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n";
+        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n       lpta_test --compare <base.json> <curr.json>\n";
         return 1;
     }
 

@@ -226,6 +226,64 @@ canvas.sparkline{width:100%;height:80px;display:block}
 
 .compare-empty{padding:60px;text-align:center;color:var(--text-muted)}
 
+/* Enhanced compare: score gauge */
+.compare-score-row{display:flex;align-items:center;gap:24px;margin-bottom:20px;padding:20px 24px;background:var(--bg-card);border:1px solid var(--border);border-radius:14px}
+.compare-score-gauge{position:relative;width:100px;height:100px;flex-shrink:0}
+.compare-score-gauge svg{transform:rotate(-90deg)}
+.compare-score-gauge .score-value{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:900;font-family:'JetBrains Mono',monospace}
+.compare-score-label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-top:4px;text-align:center}
+.compare-score-details{flex:1}
+.compare-score-details h4{font-size:14px;font-weight:700;margin-bottom:8px}
+.compare-score-details .score-desc{font-size:12px;color:var(--text-secondary);line-height:1.6}
+.score-verdict{font-weight:700;font-size:13px}
+.score-verdict.good{color:var(--green)}
+.score-verdict.warn{color:var(--yellow)}
+.score-verdict.bad{color:var(--red)}
+
+/* Enhanced compare: severity badges */
+.severity-badge{display:inline-block;font-size:9px;font-weight:700;padding:2px 7px;border-radius:6px;text-transform:uppercase;letter-spacing:.3px}
+.severity-badge.high{background:var(--red);color:#fff}
+.severity-badge.medium{background:var(--yellow);color:#000}
+.severity-badge.info{background:rgba(99,102,241,.2);color:var(--accent-light)}
+.severity-badge.positive{background:var(--green);color:#000}
+.severity-badge.low{background:rgba(255,255,255,.08);color:var(--text-muted)}
+
+/* Enhanced compare: new/removed pass indicators */
+.pass-status{display:inline-block;font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;margin-left:6px}
+.pass-status.new{background:rgba(99,102,241,.15);color:var(--accent-light)}
+.pass-status.removed{background:rgba(248,113,113,.15);color:var(--red)}
+.pass-status.unchanged{display:none}
+
+/* Enhanced compare: improvement items */
+.improvement-item{display:flex;align-items:flex-start;gap:10px;padding:12px 16px;border-radius:8px;font-size:11px;background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.25)}
+.improvement-item .r-icon{flex-shrink:0;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;background:var(--green);color:#000}
+.improvement-item .r-text{flex:1}
+.improvement-item .r-pass{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--green);margin-top:2px}
+
+/* Enhanced compare: summary counts */
+.compare-summary-counts{display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+.summary-count{display:flex;align-items:center;gap:6px;font-size:11px;padding:6px 14px;border-radius:8px;background:var(--bg-tertiary);border:1px solid var(--border)}
+.summary-count .count-num{font-weight:900;font-family:'JetBrains Mono',monospace;font-size:14px}
+.summary-count.red{border-color:var(--red)}.summary-count.red .count-num{color:var(--red)}
+.summary-count.green{border-color:var(--green)}.summary-count.green .count-num{color:var(--green)}
+.summary-count.blue{border-color:var(--accent)}.summary-count.blue .count-num{color:var(--accent-light)}
+
+/* Enhanced compare: sort controls */
+.compare-sort-bar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.compare-sort-bar label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.compare-sort-btn{background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);padding:4px 10px;border-radius:6px;font-size:10px;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif}
+.compare-sort-btn:hover{border-color:var(--accent);color:var(--text-primary)}
+.compare-sort-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+
+/* Enhanced compare: pipeline change banner */
+.pipeline-change-banner{padding:12px 20px;border-radius:8px;font-size:11px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);margin-bottom:16px;display:flex;align-items:center;gap:10px}
+.pipeline-change-banner .pc-icon{font-size:16px}
+.pipeline-change-banner strong{color:var(--yellow)}
+
+/* Enhanced compare: export button */
+.compare-export-btn{background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);padding:8px 16px;border-radius:8px;font-size:11px;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif;font-weight:600}
+.compare-export-btn:hover{border-color:var(--accent);color:var(--text-primary);background:rgba(99,102,241,.08)}
+
 /* MODALS */
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:1000;backdrop-filter:blur(8px);animation:mBgIn .2s ease}
 .modal-bg.open{display:flex;align-items:center;justify-content:center}
@@ -435,7 +493,10 @@ canvas.sparkline{width:100%;height:80px;display:block}
             </div>
           </div>
         </div>
-        <button class="compare-btn" id="compare-btn" onclick="runCompare()" disabled>Run Comparison</button>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
+          <button class="compare-btn" id="compare-btn" onclick="runCompare()" disabled>Run Comparison</button>
+          <button class="compare-export-btn" id="compare-export-btn" onclick="exportCompareJSON()" style="display:none">Export Comparison JSON</button>
+        </div>
       </div>
       <div class="compare-results" id="compare-results" style="display:none"></div>
     </div>
@@ -499,7 +560,7 @@ Click a preset or ask a question to start.</div></div>
 </div>
 
 <script>
-let D=null,F='all',eventMap=null,currentPage='overview';
+let D=null,F='all',eventMap=null,currentPage=null;
 
 // ===== NAVIGATION =====
 function goTo(page){
@@ -536,7 +597,11 @@ function animateValue(el,end,dur=700){
 // ===== LOAD =====
 async function load(){
   try{const r=await fetch('history.json');if(!r.ok)throw 0;D=await r.json();eventMap=null;render()}
-  catch(e){document.getElementById('events').innerHTML='<div style="padding:80px;text-align:center;color:var(--text-muted)">Could not load history.json<br><small>Serve with: <code style="background:var(--bg-tertiary);padding:3px 10px;border-radius:6px">python -m http.server 8080</code></small></div>';}
+  catch(e){
+    const msg='Could not load history.json. Serve with: <code style="background:var(--bg-tertiary);padding:3px 10px;border-radius:6px">python -m http.server 8080</code>';
+    document.getElementById('events').innerHTML='<div style="padding:80px;text-align:center;color:var(--text-muted)">'+msg+'</div>';
+    document.getElementById('overview-cards').innerHTML='<div style="padding:80px;text-align:center;color:var(--text-muted);grid-column:1/-1">'+msg+'</div>';
+  }
 }
 
 function render(){
@@ -548,7 +613,8 @@ function render(){
   aiInitSessions();
   // URL routing
   const h=location.hash.replace('#','');
-  if(['overview','pipeline','functions','passes'].includes(h)&&h!==currentPage)goTo(h);
+  if(['overview','pipeline','functions','passes','compare'].includes(h)&&h!==currentPage)goTo(h);
+  else if(!currentPage)goTo('overview');
 }
 
 // ===== OVERVIEW =====
@@ -737,7 +803,7 @@ function openFuncDetail(funcName){
   let cumInstr=passEvents[0]?.metrics_before?.instruction_count||0;
   const passItems=passEvents.map((e,i)=>{
     const delta=e.metrics_after.instruction_count-e.metrics_before.instruction_count;
-    cumInstr=e.metrics_after.instruction_count;
+    cumInstr+=delta;
     const cls=delta<0?'neg':delta>0?'pos':'zero';
     return `<div class="func-pass-item" data-idx="${i}" onclick="selectFuncPass(${i})">
       <div class="fp-name">${esc(e.pass_name)}</div>
@@ -1004,6 +1070,7 @@ function renderChart(){
   for(let i=0;i<n;i++){const e=evts[i];const x=pad.l+i*xStep;const y=pad.t+(e.depth/maxDepth)*plotH;let color,r;
     if(e.event_type==='after'&&e.has_changes){color='#34d399';r=2.5}else if(e.event_type==='invalidated'){color='#f87171';r=2.5}else if(e.event_type==='before'){color='rgba(99,102,241,.3)';r=1.5}else{color='rgba(99,102,241,.15)';r=1}
     ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill()}
+  attachChartTooltip();
 }
 
 // ===== IR DIFF MODAL =====
@@ -1056,13 +1123,17 @@ document.addEventListener('keydown',e=>{
   if(e.key==='2')goTo('pipeline');
   if(e.key==='3')goTo('functions');
   if(e.key==='4')goTo('passes');
+  if(e.key==='5')goTo('compare');
   if(e.key==='/'){e.preventDefault();document.getElementById('search').focus();goTo('passes')}
 });
 
 // ===== CHART HOVER =====
-(function(){
+function attachChartTooltip(){
+  if(CHART_TOOLTIP_ABORT)CHART_TOOLTIP_ABORT.abort();
+  CHART_TOOLTIP_ABORT=new AbortController();
   const canvas=document.getElementById('timeline-canvas'),tooltip=document.getElementById('chart-tooltip');
   if(!canvas||!tooltip)return;
+  const signal=CHART_TOOLTIP_ABORT.signal;
   canvas.addEventListener('mousemove',me=>{
     if(!D||!D.events||!D.events.length)return;const rect=canvas.getBoundingClientRect(),mx=me.clientX-rect.left,my=me.clientY-rect.top;
     const W=rect.width,pad={left:44,right:20},plotW=W-pad.left-pad.right,evts=D.events,n=evts.length;
@@ -1071,20 +1142,22 @@ document.addEventListener('keydown',e=>{
     const idx=Math.round(((mx-pad.left)/plotW)*(n-1));
     if(idx<0||idx>=n){tooltip.style.display='none';return}
     const e=evts[idx];if(Math.abs((pad.left+idx*xStep)-mx)>15){tooltip.style.display='none';return}
-    let html=`<div class="tt-name">${esc(e.pass_name)}</div><div class="tt-ir">${e.ir_kind} ${esc(e.ir_name)} · depth ${e.depth}</div>`;
+    let html=`<div class="tt-name">${esc(e.pass_name)}</div><div class="tt-ir">${e.ir_kind} ${esc(e.ir_name)} \u00b7 depth ${e.depth}</div>`;
     if(e.event_type==='after'&&e.has_changes){const d=e.metrics_after.instruction_count-e.metrics_before.instruction_count;html+=`<div class="tt-delta">${d>0?'+':''}${d} instructions</div>`}
     tooltip.innerHTML=html;tooltip.style.display='block';tooltip.style.left=Math.min(mx+14,W-210)+'px';tooltip.style.top=(my-12)+'px';
-  });
-  canvas.addEventListener('mouseleave',()=>{tooltip.style.display='none'});
-})();
+  },{signal});
+  canvas.addEventListener('mouseleave',()=>{tooltip.style.display='none'},{signal});
+}
 
 // ===== RESIZE =====
+let CHART_TOOLTIP_ABORT=null;
 let resizeTimer;
 new ResizeObserver(()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(D){if(currentPage==='pipeline'){renderChart();renderPipelineCharts()}if(currentPage==='overview')renderOverviewCharts();if(FUNC_CHART_DATA&&document.getElementById('func-modal-bg').classList.contains('open'))drawFuncChart(FUNC_CHART_DATA)}},150)}).observe(document.querySelector('.main'));
 
 // ===== AI INSIGHTS =====
 let AI_HIST=[],AI_BUSY=false,AI_READY=null,CURRENT_DIFF_ID=null,AI_ABORT=null;
 let AI_SESSIONS=[],AI_CUR=null,AI_STORE=null;
+let AI_HEALTH_LAST=0; // cooldown: timestamp of last health check
 const AI_IR_CAP=6000;
 
 function toggleAI(force){
@@ -1092,7 +1165,7 @@ function toggleAI(force){
   const open=force!==undefined?force:!d.classList.contains('open');
   d.classList.toggle('open',open);
   // Re-probe the backend when opening: covers "server started after page load"
-  if(open&&!AI_READY)aiHealth();
+  if(open&&!AI_READY&&Date.now()-AI_HEALTH_LAST>10000)aiHealth();
 }
 
 // ---- Chat sessions (persisted per module+pipeline in localStorage) ----
@@ -1155,6 +1228,7 @@ function mdToHtml(src){
   const closeLists=()=>{if(inUl){html+='</ul>';inUl=false}if(inOl){html+='</ol>';inOl=false}};
   const inline=t=>t
     .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener" style="color:var(--accent-light);text-decoration:underline">$1</a>')
     .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
     .replace(/(^|[\s(])\*([^*\n]+)\*/g,'$1<em>$2</em>');
   for(const raw of lines){
@@ -1179,6 +1253,7 @@ function mdToHtml(src){
 }
 
 async function aiHealth(){
+  AI_HEALTH_LAST=Date.now();
   const el=document.getElementById('ai-status');
   try{
     const r=await fetch('/api/health');const h=await r.json();
@@ -1359,10 +1434,13 @@ function buildAIContext(){
   if(D.summary.optnone_detected) L.push(`\nNOTE: ${s.optnone_function_count} optnone function(s) were stripped before the pipeline: ${s.optnone_functions.join(', ')}. LPTA runs full pipeline on all functions to show optimization potential.`);
 
   L.push('\n--- PASS EXECUTION SEQUENCE (changing passes only) ---');
+  let seqCount=0;
   for(const e of D.events){
     if(e.event_type==='after' && e.has_changes){
+      if(seqCount>=50){L.push(`  ... (${D.events.filter(x=>x.event_type==='after'&&x.has_changes).length - seqCount} more passes not shown)`);break;}
       const d=e.metrics_after.instruction_count - e.metrics_before.instruction_count;
       L.push(`  [${e.id}] ${e.pass_name} @ ${e.ir_kind} ${e.ir_name} (depth=${e.depth}): instr ${d>0?'+':''}${d}, BB ${(e.metrics_after.basic_block_count - e.metrics_before.basic_block_count)>0?'+':''}${e.metrics_after.basic_block_count - e.metrics_before.basic_block_count}, snapshot=${e.ir_before?'yes':'no'}`);
+      seqCount++;
     }
   }
   return L.join('\n');
@@ -1389,7 +1467,7 @@ METRIC DELTAS:
 ${metricLines}
 `;
   if(hasSnap){
-    ctx+=`\nIR BEFORE:\n${aiTrim(e.ir_before)}\n\nIR AFTER:\n${aiTrim(e.ir_after)}\n`;
+    ctx+=`\nIR BEFORE:\n${aiTrim(e.ir_before)}\n\nIR AFTER:\n${aiTrim(e.ir_after||'')}`;
   }else{
     ctx+=`\nNOTE: No IR snapshot for this pass. Only metric deltas available. Explain based on metrics and pass category. If BEFORE/AFTER IR missing, state what you would need to give a precise explanation.`;
   }
@@ -1433,10 +1511,12 @@ async function askAI(question,ctx){
       signal:AI_ABORT.signal
     });
     const j=await r.json().catch(()=>({}));
-    typing.remove();
+    if(typing.parentNode)typing.remove();
     if(!r.ok){
+      let errMsg=typeof j.error==='string'?j.error:JSON.stringify(j.error||('HTTP '+r.status));
+      if(r.status===401)errMsg+='\n\nThe NVIDIA API key may be invalid or a placeholder.\nGet a free key at https://build.nvidia.com/settings/api-keys\nThen update .lpta_config.json or set NVIDIA_API_KEY env var and restart the server.';
       const hint=j.hint?('\n'+j.hint):'';
-      throw new Error((typeof j.error==='string'?j.error:JSON.stringify(j.error||('HTTP '+r.status)))+hint);
+      throw new Error(errMsg+hint);
     }
     const msg=j.choices?.[0]?.message||{};
     const answer=msg.content||msg.reasoning_content||'(empty response)';
@@ -1445,7 +1525,7 @@ async function askAI(question,ctx){
     const log=document.getElementById('ai-log');log.scrollTop=log.scrollHeight;
     aiPersist();aiRenderSessions();
   }catch(err){
-    typing.remove();
+    if(typing.parentNode)typing.remove();
     if(err.name==='AbortError')aiMsg('assistant','⏹ Stopped.');
     else aiMsg('error','⚠ '+err.message);
   }finally{
@@ -1560,6 +1640,9 @@ The modal shows the exact line-by-line diff. Reference specific line changes.`,e
 // ===== COMPARE =====
 let COMPARE_BASE = null;
 let COMPARE_CURR = null;
+let COMPARE_RESULT = null;
+let COMPARE_SORT = 'instr_delta_delta';
+let COMPARE_SORT_DIR = -1;
 
 function loadBaseFile(e){
   const f=e.target.files[0];
@@ -1592,12 +1675,23 @@ async function runCompare(){
     const resp=await fetch('/api/compare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({base:COMPARE_BASE,current:COMPARE_CURR})});
     if(!resp.ok)throw new Error('Compare failed');
     const cmp=await resp.json();
+    COMPARE_RESULT=cmp;
     renderCompareResults(cmp);
+    document.getElementById('compare-export-btn').style.display='';
   }catch(err){
-    results.innerHTML=`<div class="compare-empty" style="color:var(--red)">Error: ${err.message}</div>`;
+    results.innerHTML='<div class="compare-empty" style="color:var(--red)">Error: '+err.message+'</div>';
   }
   btn.disabled=false;
   btn.textContent='Run Comparison';
+}
+
+function exportCompareJSON(){
+  if(!COMPARE_RESULT)return;
+  const blob=new Blob([JSON.stringify(COMPARE_RESULT,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='comparison.json';a.click();
+  URL.revokeObjectURL(url);
 }
 
 function renderCompareResults(cmp){
@@ -1605,71 +1699,177 @@ function renderCompareResults(cmp){
   const sb=cmp.summary;
   const bm=cmp.base_meta;
   const cm=cmp.curr_meta;
-  let html=`
-  <div class="compare-section reveal">
-    <div class="compare-section-header"><h3>Summary Comparison</h3><span class="hint">${esc(bm.module||'baseline')} (${bm.pipeline||'?'}) vs ${esc(cm.module||'current')} (${cm.pipeline||'?'})</span></div>
-    <div class="compare-section-body">
-      <div class="compare-grid">
-        ${renderCompareStat('Total Instructions (before)',sb.total_instructions_before)}
-        ${renderCompareStat('Total Instructions (after)',sb.total_instructions_after)}
-        ${renderCompareStat('Instruction Reduction',-sb.instruction_reduction_delta,true)}
-        ${renderCompareStat('Basic Blocks (after)',sb.total_bbs_after)}
-        ${renderCompareStat('Passes with Changes',sb.passes_with_changes)}
-        ${renderCompareStat('Codegen Lines (after)',sb.codegen_asm_lines_after)}
-        ${renderCompareStat('Codegen Reduction',-sb.codegen_reduction_delta,true)}
-        ${renderCompareStat('Invalidated Passes',sb.total_invalidated)}
-      </div>
-    </div>
-  </div>`;
+  const score=cmp.regression_score||0;
+  const regressions=cmp.regressions||[];
+  const improvements=cmp.improvements||[];
+  const highReg=regressions.filter(r=>r.severity==='high').length;
+  const medReg=regressions.filter(r=>r.severity==='medium').length;
+  const posImp=improvements.filter(i=>i.severity==='positive').length;
+
+  const scoreColor=score>60?'var(--red)':score>30?'var(--yellow)':'var(--green)';
+  const scoreLabel=score>60?'Regressed':score>30?'Mixed':'Improved';
+  const scoreClass=score>60?'bad':score>30?'warn':'good';
+  const circumference=2*Math.PI*42;
+  const offset=circumference-(score/100)*circumference;
+
+  let html='';
+  html+='<div class="compare-score-row reveal">';
+  html+='<div class="compare-score-gauge">';
+  html+='<svg width="100" height="100" viewBox="0 0 100 100">';
+  html+='<circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="8"/>';
+  html+='<circle cx="50" cy="50" r="42" fill="none" stroke="'+scoreColor+'" stroke-width="8" stroke-dasharray="'+circumference+'" stroke-dashoffset="'+offset+'" stroke-linecap="round" style="transition:stroke-dashoffset .8s ease"/>';
+  html+='</svg>';
+  html+='<div class="score-value" style="color:'+scoreColor+'">'+score+'</div>';
+  html+='</div>';
+  html+='<div class="compare-score-details">';
+  html+='<h4><span class="score-verdict '+scoreClass+'">'+scoreLabel+'</span> — Regression Score: '+score+'/100</h4>';
+  html+='<div class="score-desc">';
+  if(score<=10) html+='The current run shows consistent improvements across instructions, codegen, and pass behavior.';
+  else if(score<=30) html+='The current run shows mostly improvements with minor variations.';
+  else if(score<=60) html+='The current run shows mixed results — some areas improved, others regressed.';
+  else html+='The current run shows significant regressions that may warrant investigation.';
+  html+='</div></div></div>';
+
+  html+='<div class="compare-summary-counts reveal">';
+  html+='<div class="summary-count red"><span class="count-num">'+highReg+'</span> High Severity</div>';
+  html+='<div class="summary-count red"><span class="count-num">'+medReg+'</span> Medium Severity</div>';
+  html+='<div class="summary-count green"><span class="count-num">'+posImp+'</span> Improvements</div>';
+  html+='<div class="summary-count blue"><span class="count-num">'+(regressions.length+improvements.length)+'</span> Total Findings</div>';
+  html+='</div>';
+
+  if(sb.pipeline_changed){
+    html+='<div class="pipeline-change-banner reveal"><span class="pc-icon">ℹ</span> Pipeline changed from <strong>'+esc(sb.base_pipeline)+'</strong> to <strong>'+esc(sb.curr_pipeline)+'</strong></div>';
+  }
+
+  html+='<div class="compare-section reveal">';
+  html+='<div class="compare-section-header"><h3>Summary Comparison</h3><span class="hint">'+esc(bm.module||'baseline')+' ('+(bm.pipeline||'?')+') vs '+esc(cm.module||'current')+' ('+(cm.pipeline||'?')+')</span></div>';
+  html+='<div class="compare-section-body"><div class="compare-grid">';
+  html+=renderCompareStat('Total Instructions (before)',sb.total_instructions_before);
+  html+=renderCompareStat('Total Instructions (after)',sb.total_instructions_after);
+  html+=renderCompareStat('Instruction Reduction',-sb.instruction_reduction_delta,true);
+  html+=renderCompareStat('Basic Blocks (after)',sb.total_bbs_after);
+  html+=renderCompareStat('Passes with Changes',sb.passes_with_changes);
+  html+=renderCompareStat('Codegen Lines (after)',sb.codegen_asm_lines_after);
+  html+=renderCompareStat('Codegen Reduction',-sb.codegen_reduction_delta,true);
+  html+=renderCompareStat('Invalidated Passes',sb.total_invalidated);
+  html+='</div></div></div>';
 
   if(cmp.targets && cmp.targets.length){
-    html+=`<div class="compare-section reveal"><div class="compare-section-header"><h3>Cross-Target Codegen</h3></div><div class="compare-section-body">
-      <table class="compare-table"><thead><tr><th>Target</th><th>Baseline Before</th><th>Baseline After</th><th>Baseline Δ</th><th>Current Before</th><th>Current After</th><th>Current Δ</th><th>Δ vs Baseline</th></tr></thead><tbody>`;
+    html+='<div class="compare-section reveal"><div class="compare-section-header"><h3>Cross-Target Codegen</h3></div><div class="compare-section-body">';
+    html+='<table class="compare-table"><thead><tr><th>Target</th><th>Baseline Before</th><th>Baseline After</th><th>Baseline Δ</th><th>Current Before</th><th>Current After</th><th>Current Δ</th><th>Δ vs Baseline</th></tr></thead><tbody>';
     for(const t of cmp.targets){
       if(!t.available){
-        html+=`<tr class="warn"><td>${esc(t.target)}</td><td colspan="6">Error: ${esc(t.base_error||t.curr_error)}</td></tr>`;
+        html+='<tr class="warn"><td>'+esc(t.target)+'</td><td colspan="6">Error: '+esc(t.base_error||t.curr_error)+'</td></tr>';
       }else{
         const cls=t.red_delta>0?'neg':t.red_delta<0?'pos':'zero';
-        html+=`<tr><td>${esc(t.target)}</td><td>${t.base_before}</td><td>${t.base_after}</td><td class="${t.base_red>0?'neg':t.base_red<0?'pos':'zero'}">${t.base_red>0?'+':''}${t.base_red}</td><td>${t.curr_before}</td><td>${t.curr_after}</td><td class="${t.curr_red>0?'neg':t.curr_red<0?'pos':'zero'}">${t.curr_red>0?'+':''}${t.curr_red}</td><td class="${cls}">${t.red_delta>0?'+':''}${t.red_delta}</td></tr>`;
+        const brc=t.base_red>0?'neg':t.base_red<0?'pos':'zero';
+        const crc=t.curr_red>0?'neg':t.curr_red<0?'pos':'zero';
+        html+='<tr><td>'+esc(t.target)+'</td><td>'+t.base_before+'</td><td>'+t.base_after+'</td>';
+        html+='<td class="'+brc+'">'+(t.base_red>0?'+':'')+t.base_red+'</td>';
+        html+='<td>'+t.curr_before+'</td><td>'+t.curr_after+'</td>';
+        html+='<td class="'+crc+'">'+(t.curr_red>0?'+':'')+t.curr_red+'</td>';
+        html+='<td class="'+cls+'">'+(t.red_delta>0?'+':'')+t.red_delta+'</td></tr>';
       }
     }
-    html+=`</tbody></table></div></div>`;
+    html+='</tbody></table></div></div>';
   }
 
   if(cmp.passes && cmp.passes.length){
-    html+=`<div class="compare-section reveal"><div class="compare-section-header"><h3>Pass-Level Impact</h3><span class="hint">${cmp.passes.length} passes compared</span></div><div class="compare-section-body">
-      <table class="compare-table"><thead><tr><th>Pass</th><th>Baseline Count</th><th>Current Count</th><th>Count Δ</th><th>Baseline Instr Δ</th><th>Current Instr Δ</th><th>Instr Δ vs Baseline</th><th>Baseline BB Δ</th><th>Current BB Δ</th><th>BB Δ vs Baseline</th></tr></thead><tbody>`;
-    for(const p of cmp.passes){
-      const instrCls=p.instr_delta_delta<0?'neg':p.instr_delta_delta>0?'pos':'zero';
-      const bbCls=p.bb_delta_delta<0?'neg':p.bb_delta_delta>0?'pos':'zero';
-      const warn=p.instr_delta_delta>20||p.bb_delta_delta>10?' warn':'';
-      html+=`<tr class="${warn}"><td><strong>${esc(p.pass_name)}</strong></td><td>${p.base_count}</td><td>${p.curr_count}</td><td class="${p.count_delta<0?'neg':p.count_delta>0?'pos':'zero'}">${p.count_delta>0?'+':''}${p.count_delta}</td><td class="${p.base_instr_delta<0?'neg':p.base_instr_delta>0?'pos':'zero'}">${p.base_instr_delta>0?'+':''}${p.base_instr_delta}</td><td class="${p.curr_instr_delta<0?'neg':p.curr_instr_delta>0?'pos':'zero'}">${p.curr_instr_delta>0?'+':''}${p.curr_instr_delta}</td><td class="${instrCls}">${p.instr_delta_delta>0?'+':''}${p.instr_delta_delta}</td><td class="${p.base_bb_delta<0?'neg':p.base_bb_delta>0?'pos':'zero'}">${p.base_bb_delta>0?'+':''}${p.base_bb_delta}</td><td class="${p.curr_bb_delta<0?'neg':p.curr_bb_delta>0?'pos':'zero'}">${p.curr_bb_delta>0?'+':''}${p.curr_bb_delta}</td><td class="${bbCls}">${p.bb_delta_delta>0?'+':''}${p.bb_delta_delta}</td></tr>`;
+    html+='<div class="compare-section reveal"><div class="compare-section-header"><h3>Pass-Level Impact</h3><span class="hint">'+cmp.passes.length+' passes compared</span></div><div class="compare-section-body">';
+    html+='<div class="compare-sort-bar"><label>Sort by:</label>';
+    const sorts=[['instr_delta_delta','Instr Δ'],['bb_delta_delta','BB Δ'],['load_delta_delta','Load Δ'],['store_delta_delta','Store Δ'],['count_delta','Exec Count']];
+    for(const [k,lbl] of sorts){
+      html+='<button class="compare-sort-btn '+(COMPARE_SORT===k?'active':'')+'" onclick="compareSort(\''+k+'\')">'+lbl+'</button>';
     }
-    html+=`</tbody></table></div></div>`;
+    html+='</div>';
+    html+='<table class="compare-table"><thead><tr><th>Pass</th><th>Status</th><th>Base Count</th><th>Curr Count</th><th>Count Δ</th><th>Base Instr Δ</th><th>Curr Instr Δ</th><th>Instr Δ²</th><th>BB Δ²</th><th>Load Δ²</th><th>Store Δ²</th></tr></thead><tbody>';
+    const sorted=[...cmp.passes].sort((a,b)=>{
+      const av=Math.abs(a[COMPARE_SORT]||0);
+      const bv=Math.abs(b[COMPARE_SORT]||0);
+      return COMPARE_SORT_DIR*(bv-av);
+    });
+    for(const p of sorted){
+      const ic=p.instr_delta_delta<0?'neg':p.instr_delta_delta>0?'pos':'zero';
+      const bc=p.bb_delta_delta<0?'neg':p.bb_delta_delta>0?'pos':'zero';
+      const lc=p.load_delta_delta<0?'neg':p.load_delta_delta>0?'pos':'zero';
+      const sc=p.store_delta_delta<0?'neg':p.store_delta_delta>0?'pos':'zero';
+      const warn=(p.instr_delta_delta>20||p.bb_delta_delta>10)?' warn':'';
+      const st=p.status||'unchanged';
+      const stl=st==='new'?'NEW':st==='removed'?'GONE':'';
+      const dcls=v=>v<0?'neg':v>0?'pos':'zero';
+      html+='<tr class="'+warn+'"><td><strong>'+esc(p.pass_name)+'</strong></td>';
+      html+='<td><span class="pass-status '+st+'">'+stl+'</span></td>';
+      html+='<td>'+p.base_count+'</td><td>'+p.curr_count+'</td>';
+      html+='<td class="'+dcls(p.count_delta)+'">'+(p.count_delta>0?'+':'')+p.count_delta+'</td>';
+      html+='<td class="'+dcls(p.base_instr_delta)+'">'+(p.base_instr_delta>0?'+':'')+p.base_instr_delta+'</td>';
+      html+='<td class="'+dcls(p.curr_instr_delta)+'">'+(p.curr_instr_delta>0?'+':'')+p.curr_instr_delta+'</td>';
+      html+='<td class="'+ic+'">'+(p.instr_delta_delta>0?'+':'')+p.instr_delta_delta+'</td>';
+      html+='<td class="'+bc+'">'+(p.bb_delta_delta>0?'+':'')+p.bb_delta_delta+'</td>';
+      html+='<td class="'+lc+'">'+(p.load_delta_delta>0?'+':'')+p.load_delta_delta+'</td>';
+      html+='<td class="'+sc+'">'+(p.store_delta_delta>0?'+':'')+p.store_delta_delta+'</td></tr>';
+    }
+    html+='</tbody></table></div></div>';
   }
 
-  if(cmp.regressions && cmp.regressions.length){
-    html+=`<div class="compare-section reveal"><div class="compare-section-header"><h3>⚠ Regressions Detected</h3><span class="hint">${cmp.regressions.length} issue(s) found</span></div><div class="compare-section-body">
-      <div class="regression-list">`;
-    for(const r of cmp.regressions){
-      html+=`<div class="regression-item ${r.severity}"><div class="r-icon">${r.severity==='high'?'⚠':'⚡'}</div><div class="r-text"><div>${esc(r.message)}</div>${r.pass?`<div class="r-pass">Pass: ${esc(r.pass)}</div>`:''}</div></div>`;
+  if(regressions.length){
+    html+='<div class="compare-section reveal"><div class="compare-section-header"><h3>⚠ Regressions Detected</h3><span class="hint">'+regressions.length+' issue(s)</span></div><div class="compare-section-body"><div class="regression-list">';
+    for(const r of regressions){
+      const icon=r.severity==='high'?'⚠':r.severity==='medium'?'⚡':'ℹ';
+      html+='<div class="regression-item '+r.severity+'"><div class="r-icon">'+icon+'</div><div class="r-text"><div>'+esc(r.message)+'</div>';
+      if(r.pass) html+='<div class="r-pass">Pass: '+esc(r.pass)+'</div>';
+      if(r.target) html+='<div class="r-pass">Target: '+esc(r.target)+'</div>';
+      html+='<span class="severity-badge '+r.severity+'">'+r.severity+'</span></div></div>';
     }
-    html+=`</div></div></div>`;
+    html+='</div></div></div>';
   }
 
-  if(!cmp.passes?.length && !cmp.targets?.length && !cmp.regressions?.length){
-    html+=`<div class="compare-section reveal"><div class="compare-section-header"><h3>No Significant Differences</h3></div><div class="compare-section-body"><div class="compare-empty">The two reports are essentially identical.</div></div></div>`;
+  if(improvements.length){
+    html+='<div class="compare-section reveal"><div class="compare-section-header"><h3>✅ Improvements Detected</h3><span class="hint">'+improvements.length+' item(s)</span></div><div class="compare-section-body"><div class="regression-list">';
+    for(const i of improvements){
+      const icon=i.severity==='positive'?'✅':'ℹ';
+      html+='<div class="improvement-item"><div class="r-icon">'+icon+'</div><div class="r-text"><div>'+esc(i.message)+'</div>';
+      if(i.pass) html+='<div class="r-pass">Pass: '+esc(i.pass)+'</div>';
+      if(i.target) html+='<div class="r-pass">Target: '+esc(i.target)+'</div>';
+      html+='<span class="severity-badge '+i.severity+'">'+i.severity+'</span></div></div>';
+    }
+    html+='</div></div></div>';
+  }
+
+  const newP=cmp.new_passes||[];
+  const remP=cmp.removed_passes||[];
+  if(newP.length||remP.length){
+    html+='<div class="compare-section reveal"><div class="compare-section-header"><h3>⚙ Pass Presence Changes</h3></div><div class="compare-section-body">';
+    if(newP.length){
+      html+='<div style="margin-bottom:10px"><strong style="color:var(--accent-light)">New passes ('+newP.length+'):</strong> <span style="color:var(--text-secondary)">'+newP.map(p=>esc(p)).join(', ')+'</span></div>';
+    }
+    if(remP.length){
+      html+='<div><strong style="color:var(--red)">Removed passes ('+remP.length+'):</strong> <span style="color:var(--text-secondary)">'+remP.map(p=>esc(p)).join(', ')+'</span></div>';
+    }
+    html+='</div></div>';
+  }
+
+  if(!cmp.passes?.length && !cmp.targets?.length && !regressions.length && !improvements.length && !newP.length && !remP.length){
+    html+='<div class="compare-section reveal"><div class="compare-section-header"><h3>No Significant Differences</h3></div><div class="compare-section-body"><div class="compare-empty">The two reports are essentially identical.</div></div></div>';
   }
 
   results.innerHTML=html;
   triggerReveals();
 }
 
-function renderCompareStat(label,val,invert=false){
-  let cls='neutral';
-  if(val>0)cls=invert?'regressed':'improved';
-  else if(val<0)cls=invert?'improved':'regressed';
-  return `<div class="compare-stat ${val>50||val<-50?'critical':val>20||val<-20?'warning':''}"><div class="compare-stat-label">${esc(label)}</div><div class="compare-stat-value ${cls}">${val>0?'+':''}${val}</div><div class="compare-stat-delta">vs baseline</div></div>`;
+function compareSort(field){
+  if(COMPARE_SORT===field){COMPARE_SORT_DIR*=-1;}else{COMPARE_SORT=field;COMPARE_SORT_DIR=-1;}
+  renderCompareResults(COMPARE_RESULT);
+}
+
+function renderCompareStat(label,val,invert){
+  if(invert===undefined) invert=false;
+  var cls='neutral';
+  if(val>0) cls=invert?'regressed':'improved';
+  else if(val<0) cls=invert?'improved':'regressed';
+  var bdr='';
+  if(val>50||val<-50) bdr='critical';
+  else if(val>20||val<-20) bdr='warning';
+  return '<div class="compare-stat '+bdr+'"><div class="compare-stat-label">'+esc(label)+'</div><div class="compare-stat-value '+cls+'">'+(val>0?'+':'')+val+'</div><div class="compare-stat-delta">vs baseline</div></div>';
 }
 
 // ===== INIT =====
