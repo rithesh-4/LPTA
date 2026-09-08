@@ -124,11 +124,28 @@ for i in $(seq 1 $ITERATIONS); do
             echo "[CRASH] Iteration $i (RC=$RC)" >> "$LOG"
             echo "  $OUTPUT" >> "$LOG"
             cp "$MUTANT" "$CRASH_DIR/crash_$i.ll"
+        elif [ $RC -ne 1 ]; then
+            # RC=1 is the documented bad-input exit; any other non-zero
+            # code without a crash signature is still unexpected.
+            CRASHES=$((CRASHES + 1))
+            echo "[CRASH] Iteration $i unexpected RC=$RC" >> "$LOG"
+            cp "$MUTANT" "$CRASH_DIR/crash_$i.ll"
         else
             PASS=$((PASS + 1))
         fi
     else
-        PASS=$((PASS + 1))
+        # RC=0 must produce parseable JSON with the events/summary contract
+        if [ ! -f "$OUTFILE/history.json" ]; then
+            CRASHES=$((CRASHES + 1))
+            echo "[CORRUPT] Iteration $i RC=0 but history.json missing" >> "$LOG"
+            cp "$MUTANT" "$CRASH_DIR/corrupt_$i.ll"
+        elif command -v python3 &>/dev/null && ! python3 -c "import json; d=json.load(open(\"$OUTFILE/history.json\")); assert 'events' in d and 'summary' in d" >/dev/null 2>&1; then
+            CRASHES=$((CRASHES + 1))
+            echo "[CORRUPT] Iteration $i RC=0 but history.json invalid" >> "$LOG"
+            cp "$MUTANT" "$CRASH_DIR/corrupt_$i.ll"
+        else
+            PASS=$((PASS + 1))
+        fi
     fi
     
     # Cleanup

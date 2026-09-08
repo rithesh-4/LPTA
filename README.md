@@ -1,6 +1,6 @@
 # LPTA — LLVM Pass Transformation Analysis
 
-A tool that makes LLVM's optimization pipeline transparent by recording IR state before and after every pass, computing measurable changes, and presenting the results as an interactive dashboard.
+A tool that makes LLVM's optimization pipeline transparent by recording before/after metrics for every pass, detecting real IR changes via hashing, and presenting the results as an interactive dashboard.
 
 ## The Problem
 
@@ -17,13 +17,13 @@ LPTA runs the LLVM optimization pipeline (configurable: -O0 to -Oz)
   ↓
 Instruments every pass execution via LLVM's PassInstrumentationCallbacks
   ↓
-Records IR state before and after each pass
+Records before/after metrics for each pass + hashes IR to detect real changes
   ↓
 Computes structural metrics and deltas
   ↓
-Saves before/after IR text for passes that made changes
+Saves before/after IR text for allowlisted passes that changed the IR
   ↓
-Measures final codegen impact via llc
+Measures final codegen size impact via llc (a size proxy, not a benchmark)
   ↓
 Generates structured JSON + interactive HTML dashboard
 ```
@@ -96,6 +96,7 @@ bash run_lpta.sh input.ll
 | `--targets=common` | Cross-target codegen: x86_64, aarch64, riscv64 presets. |
 | `--targets=triple1,triple2` | Comma-separated LLVM target triples. |
 | `--targets=@file.txt` | Read triples from file (one per line, `#` comments allowed). |
+| `--` | End of flags: following args are treated as paths even if starting with `-`. |
 
 #### Examples
 
@@ -173,9 +174,17 @@ python serve_dashboard.py report -p 8080
 
 The **Compare** page (key `5`) loads two `history.json` files and computes:
 - Summary delta (instructions, BBs, codegen, invalidated)
-- Per-target codegen regression
-- Per-pass impact delta
+- Per-target codegen regression (dashboard Compare tab and CLI `--compare` agree)
+- Per-pass impact delta (a pass counts as changed if counters moved *or* IR hash moved)
 - Auto-detected regressions (>5% instruction/codegen increase)
+
+> **Heuristic indicator (0–100, higher = worse):** the score is a triage aid, not a
+> benchmark. Formula: `40%` instruction-delta term (`clamp(50 + pct, 0, 100)`) +
+> `30%` codegen-delta term + finding term (`min(30, 15·high + 5·medium)·0.2` −
+> `min(20, 10·improvements)·0.1`). Bands: ≤10 improved, ≤30 mostly improved,
+> ≤60 mixed, >60 regressed (CLI exits 1 above 60). The same formula is
+> implemented twice — `src/main.cpp` (`--compare`) and `serve_dashboard.py`
+> (`/api/compare`) — keep them in sync.
 
 #### Workflow
 ```bash
@@ -299,6 +308,7 @@ python ../serve_dashboard.py . -p 8080
 | Dashboard shows "Could not load history.json" | Serve via HTTP (`python -m http.server`), not `file://` |
 | "Stack remaining: N (WARNING)" | PassFrame stack imbalance — bug in pass matching |
 | Cross-target fails | Ensure `llc` is in PATH or LLVM_DIR (bundled works) |
+| Compare tab shows "backend not reachable" | Serve with `python serve_dashboard.py` (not plain `http.server`), or use `./build/lpta_test.exe --compare base.json curr.json` |
 | AI panel shows "no backend" | `export NVIDIA_API_KEY=nvapi-...` then restart server |
 
 ### Files You'll Generate
@@ -375,15 +385,17 @@ Aggregated view showing which pass types had the most effect.
 > and a file-level call map. Annotated repository map: [docs/architecture/PROJECT_MAP.md](docs/architecture/PROJECT_MAP.md).
 
 ```
-inc/ + src/             ← Modular C++ implementation
+inc/ + src/             ← Modular C++ implementation (9 files)
   Config.h              ← Shared globals (output dir, opt level, snapshots flag)
-  Metrics.h/.cpp        ← 10 structural counters (instructions, BBs, calls, etc.)
-  Detection.h/.cpp      ← Detects IR unit type from Any (Module/Function/Loop)
-  Tracker.h/.cpp        ← PassFrame stack + Event records; tracks nested pass execution
-  Snapshots.h/.cpp      ← Selective IR snapshot saving for changed passes
-  Codegen.h/.cpp        ← Uses llc to measure assembly size
+  Metrics.h/.cpp        ← 10 structural counters + 8-group opcode histogram
+  Detection.h/.cpp      ← Detects IR unit type from Any (Module/Function/Loop);
+                            FNV-1a IR hashing for real-change detection
+  Tracker.h/.cpp        ← PassFrame stack + Event records (`has_changes` + `ir_changed`)
+  Snapshots.h/.cpp      ← Allowlist-gated IR snapshot saving (kMaxSnapshotBytes pair cap)
+  Codegen.h/.cpp        ← Uses llc to measure assembly size (native + multi-target)
   JsonWriter.h/.cpp     ← Writes structured history.json
-  main.cpp              ← CLI parsing (-O0..-Oz, --snapshots) + pipeline wiring
+  Util.h/.cpp           ← sanitizeFilename + shared helpers
+  main.cpp              ← CLI parsing (-O0..-Oz, --snapshots, --targets, --compare) + pipeline wiring
 
 dashboard.html         ← Self-contained HTML/CSS/JS dashboard
   ├── Summary cards
@@ -401,13 +413,18 @@ dashboard.html         ← Self-contained HTML/CSS/JS dashboard
 LLVM's pass pipeline is hierarchical (Module → Function → Loop). Passes nest inside adaptors. A single "current pass" variable would be overwritten by inner passes. LPTA uses a **stack** of `PassFrame` objects to correctly match BEFORE/AFTER events across nesting.
 
 ### Metrics, Not Interpretation
-LPTA counts structural properties (instructions, blocks, calls, etc.) — it does **not** claim fewer instructions = better performance. The significance score is a heuristic, not ground truth.
+LPTA counts structural properties (instructions, blocks, calls, etc.) — it does **not** claim fewer instructions = better performance. The regression score is a heuristic indicator, not ground truth (see formula below).
+
+LPTA tracks two separate change signals per pass: `has_changes` (any structural counter moved) and `ir_changed` (the serialized IR hash moved — catches edits invisible to counters, e.g. constant folds). A pass can rewrite IR without moving any counter; both signals are recorded so reviewers can tell "metrics moved" apart from "IR text changed".
 
 ### Selective IR Snapshots
-Full IR text is expensive to capture for every pass. LPTA only saves IR text for passes that actually changed the IR, keeping the JSON file manageable.
+Full IR text is expensive to capture for every pass. LPTA records metrics for every pass but saves IR text only for allowlisted passes whose IR actually changed (`ir_changed`), keeping the JSON file manageable. CGSCC-level passes operate on IR units LPTA cannot meter — they are recorded as events with zero metrics (see "Supported IR granularities" below).
 
 ### Codegen via llc
-Object size measurement uses `llc` to compile before/after IR to assembly, then counts lines and bytes. This gives a concrete measure of how optimization affected final codegen.
+Object size measurement uses `llc` to compile before/after IR to assembly, then counts lines and bytes. This gives a concrete measure of how optimization affected final codegen **size** — a useful proxy when investigating codegen, not a runtime benchmark.
+
+### Supported IR granularities
+LPTA meters three IR units — **Module**, **Function**, **Loop** — with full counters, opcode histograms, and IR hashing. Passes operating on other units (notably CGSCC-level passes over `LazyCallGraph::SCC`, plus analysis-only passes) are still recorded as events for ordering/nesting, but carry zero metrics and `ir_changed: false` — there is no stable per-unit serialization to hash. The tool prints one console warning per such pass. Full CGSCC metering is future work.
 
 ## Files
 
@@ -477,7 +494,7 @@ The C++ source code contains `assert()` statements that verify counting invarian
 
 ### 6. Unit Tests
 
-57 unit tests (`tests/test_utilities.cpp`) verify utility functions, delta calculations, JSON escaping, pass classification, IR-level metric counting (invoke/callbr), and edge cases.
+72 unit tests (`tests/test_utilities.cpp`) verify utility functions, delta calculations, JSON escaping, pass classification, IR-level metric counting (invoke/callbr), opcode-group partitioning, IR-hash determinism/sensitivity, and edge cases.
 
 ### 7. Fuzz Testing
 

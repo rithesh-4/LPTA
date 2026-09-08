@@ -28,7 +28,7 @@ flowchart TD
 
         subgraph INSTR["Instrumentation (the core idea)"]
             direction LR
-            DET["Detection.cpp<br/>detectIR(Any)<br/>→ kind + name + metrics"] --> MET["Metrics.cpp<br/>capture*Metrics()<br/>10 structural counters"]
+            DET["Detection.cpp<br/>detectIR(Any) + FNV-1a IR hash<br/>→ kind + name + metrics"] --> MET["Metrics.cpp<br/>capture*Metrics()<br/>10 counters + 8 opcode groups"]
         end
 
         PB -->|"BEFORE callback"| PUSH["push PassFrame onto pass_stack<br/>+ 'before' Event → g_events"]
@@ -50,8 +50,8 @@ flowchart TD
 
     MOD -->|"print()"| IRO
     POP -->|"g_events"| JSON
-    PUSH --> SNAP
-    RUN --> SNAP
+    PUSH -->|"if shouldSnapshot + under kMaxSnapshotBytes"| SNAP
+    RUN -->|"if changed + allowlisted + pair fits cap"| SNAP
 
     IRO -->|"llc ×2 (Codegen.cpp)"| ASM["asm line/byte counts<br/>(CodegenResult)"]
     ASM --> JSON
@@ -142,7 +142,7 @@ flowchart LR
         JW["JsonWriter.cpp<br/>escape → history.json"]
     end
 
-    TEST["tests/test_utilities.cpp<br/>57 unit tests"]
+    TEST["tests/test_utilities.cpp<br/>72 unit tests"]
 
     MAIN -->|"detectIR(IR)"| DETC
     DETC --> METC

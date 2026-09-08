@@ -105,6 +105,9 @@ def _classify(inst, c):
         return
     if re.search(r"\bcall\b", s):
         c["call_count"] += 1
+    elif re.search(r"\binvoke\b|\bcallbr\b", s):
+        # invoke/callbr are call opcodes without a literal "call" token
+        c["call_count"] += 1
     if re.search(r"=\s*load\b", s) or s.startswith("load "):
         c["load_count"] += 1
     if re.search(r"\bstore\b", s):
@@ -164,9 +167,25 @@ def check_consistency(json_path):
     if s["total_events"] != len(events):
         issues.append(f"summary.total_events={s['total_events']} != {len(events)}")
 
-    ids = [e["id"] for e in events]
-    if ids != list(range(1, len(ids) + 1)):
-        issues.append("Event IDs not sequential")
+    # Event IDs are shared by before/after pairs: only before-IDs are sequential
+    b_ids = [e["id"] for e in events if e["event_type"] == "before"]
+    if b_ids != list(range(1, len(b_ids) + 1)):
+        issues.append("Before-event IDs not sequential")
+
+    OP_KEYS = ["op_arith", "op_cmp", "op_memory", "op_control",
+               "op_cast", "op_call", "op_vector", "op_other"]
+    for e in events:
+        mkeys = []
+        if "metrics" in e:
+            mkeys.append("metrics")
+        if e["event_type"] == "after":
+            mkeys += ["metrics_before", "metrics_after"]
+        for mk in mkeys:
+            m = e.get(mk, {})
+            if any(k not in m for k in OP_KEYS):
+                issues.append(f"Event {e['id']}: {mk} missing opcode-group keys")
+            elif sum(m[k] for k in OP_KEYS) != m.get("instruction_count", 0):
+                issues.append(f"Event {e['id']}: opcode groups do not partition in {mk}")
 
     for e in events:
         if e["event_type"] == "after":
@@ -239,13 +258,10 @@ def main():
             if g == v:
                 result = "  OK"
                 passed += 1
-            elif v <= g:
-                result = "  ~OK"
-                passed += 1
             else:
                 result = "  FAIL"
                 failed += 1
-                issues.append((tname, f"{label}: LPTA={v} > GT={g}"))
+                issues.append((tname, f"{label}: LPTA={v} != GT={g}"))
             print(f"  {label:<20} {g:>6} {v:>6} {result}")
 
         print(f"\n  Summary: {summ['total_events']} events, "

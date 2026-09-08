@@ -17,6 +17,8 @@
 #   PHIs:           1 (phi in merge)
 #   Returns:        2 (ret in merge, helper_entry)
 #   Globals:        0
+#   Op histogram:   arith=5, cmp=2 (icmp+phi), control=5 (3 br + 2 ret),
+#                   memory/cast/call/vector/other=0 (sums to 12)
 #
 # Usage: bash tests/judge_proof.sh [build_dir]
 # ============================================================
@@ -75,6 +77,7 @@ echo -e "  ${BOLD}Branches:${NC}       3  (br in entry, then, else blocks)"
 echo -e "  ${BOLD}PHIs:${NC}           1  (phi in merge block)"
 echo -e "  ${BOLD}Returns:${NC}        2  (ret in merge, helper_entry)"
 echo -e "  ${BOLD}Globals:${NC}        0  (no global variables)"
+echo -e "  ${BOLD}Op histogram:${NC}   arith=5, cmp=2, control=5, memory/cast/call/vector/other=0"
 echo ""
 
 # ============================================================
@@ -113,7 +116,8 @@ if not first_before:
 
 m = first_before['metrics']
 
-# Ground truth
+# Ground truth (hand-counted from tiny_proof.ll above:
+# arith: 5 adds/subs/muls; cmp: icmp + phi; control: 3 br + 2 ret)
 gt = {
     'function_count':    2,
     'basic_block_count': 5,
@@ -125,6 +129,14 @@ gt = {
     'phi_count':         1,
     'return_count':      2,
     'global_count':      0,
+    'op_arith':          5,
+    'op_cmp':            2,
+    'op_memory':         0,
+    'op_control':        5,
+    'op_cast':           0,
+    'op_call':           0,
+    'op_vector':         0,
+    'op_other':          0,
 }
 
 labels = {
@@ -138,13 +150,23 @@ labels = {
     'phi_count':         'PHIs',
     'return_count':      'Returns',
     'global_count':      'Globals',
+    'op_arith':          'Op/arith',
+    'op_cmp':            'Op/cmp',
+    'op_memory':         'Op/memory',
+    'op_control':        'Op/control',
+    'op_cast':           'Op/cast',
+    'op_call':           'Op/call',
+    'op_vector':         'Op/vector',
+    'op_other':          'Op/other',
 }
 
 all_pass = True
 for key in ['function_count', 'basic_block_count', 'instruction_count',
             'call_count', 'load_count', 'store_count',
-            'branch_count', 'phi_count', 'return_count', 'global_count']:
-    lpta_val = m[key]
+            'branch_count', 'phi_count', 'return_count', 'global_count',
+            'op_arith', 'op_cmp', 'op_memory', 'op_control',
+            'op_cast', 'op_call', 'op_vector', 'op_other']:
+    lpta_val = m.get(key, 0)
     gt_val = gt[key]
     match = lpta_val == gt_val
     status = '\033[0;32m✓ MATCH\033[0m' if match else '\033[0;31m✗ MISMATCH\033[0m'
@@ -155,7 +177,7 @@ for key in ['function_count', 'basic_block_count', 'instruction_count',
 
 print()
 if all_pass:
-    print('  \033[0;32m\033[1mRESULT: ALL 10 METRICS EXACTLY MATCH ✓\033[0m')
+    print('  \033[0;32m\033[1mRESULT: ALL 18 METRICS EXACTLY MATCH ✓\033[0m')
 else:
     print('  \033[0;31mRESULT: SOME METRICS DO NOT MATCH ✗\033[0m')
     sys.exit(1)
@@ -276,6 +298,22 @@ before_ids = {e['id'] for e in events if e['event_type'] == 'before'}
 handled = {e['id'] for e in events if e['event_type'] in ('after', 'invalidated')}
 checks.append(('Every before event has a matching after/invalidated', before_ids <= handled))
 
+# Check 6: opcode groups partition instruction_count in every event
+OP_KEYS = ['op_arith', 'op_cmp', 'op_memory', 'op_control',
+           'op_cast', 'op_call', 'op_vector', 'op_other']
+def _part_ok(e, mkey):
+    m = e.get(mkey, {})
+    return all(k in m for k in OP_KEYS) and sum(m[k] for k in OP_KEYS) == m.get('instruction_count', 0)
+part_ok = True
+for e in events:
+    if e['event_type'] == 'after':
+        if not (_part_ok(e, 'metrics_before') and _part_ok(e, 'metrics_after')):
+            part_ok = False
+    elif 'metrics' in e:
+        if not _part_ok(e, 'metrics'):
+            part_ok = False
+checks.append(('Opcode groups partition instruction_count everywhere', part_ok))
+
 for label, ok in checks:
     status = '\033[0;32m✓\033[0m' if ok else '\033[0;31m✗\033[0m'
     print(f'  {status} {label}')
@@ -293,7 +331,7 @@ echo -e "${BOLD}╚════════════════════�
 echo ""
 echo "  Summary of proof sources:"
 echo "  1. Hand-countable IR file (tiny_proof.ll) — you verified it above"
-echo "  2. LPTA metrics extracted from history.json — matched all 10 metrics"
+echo "  2. LPTA metrics extracted from history.json — matched all 18 metrics"
 echo "  3. Determinism — two runs produce byte-identical JSON"
 echo "  4. Self-consistency — all JSON invariants verified"
 echo ""

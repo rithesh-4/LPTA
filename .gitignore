@@ -19,6 +19,11 @@ demo_*/
 
 # Temp batch scripts
 run_llc_*.bat
+*.run_llc.bat
+
+# Local agent/tool state (large vendored deps live here)
+.opencode/node_modules/
+.opencode/*.log
 
 # Generated IR snapshots
 ir_before_opt.ll

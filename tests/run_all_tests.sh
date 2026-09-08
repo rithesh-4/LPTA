@@ -3,11 +3,13 @@
 # LPTA Comprehensive Test Suite
 #
 # Runs all testing techniques:
-#   1. Static analysis (clang-tidy)
+#   1. Static analysis (clang-tidy, optional)
 #   2. Unit tests (test_utilities)
 #   3. Edge case / boundary tests
 #   4. Mutation fuzz testing
 #   5. Formal verification (assertions in code)
+#   6. Ground-truth proof (judge_proof.sh on tiny_proof.ll)
+#   7. Cross-validation (validate_correctness.sh: independent recount + opt -stats + determinism)
 #
 # Usage: bash tests/run_all_tests.sh [build_dir]
 # ============================================================
@@ -86,9 +88,29 @@ head -5 test.ll > "$TMP_DIR/t_truncated.ll"
 "$EXE" test.ll "$TMP_DIR/t_o0" -O0 >/dev/null 2>&1
 [ $? -eq 0 ] && pass "Valid -O0 -> RC=0" || fail "Valid -O0 -> RC=$?"
 
+# Test: valid -O1
+"$EXE" test.ll "$TMP_DIR/t_o1" -O1 >/dev/null 2>&1
+[ $? -eq 0 ] && pass "Valid -O1 -> RC=0" || fail "Valid -O1 -> RC=$?"
+
 # Test: valid -O3
 "$EXE" test.ll "$TMP_DIR/t_o3" -O3 >/dev/null 2>&1
 [ $? -eq 0 ] && pass "Valid -O3 -> RC=0" || fail "Valid -O3 -> RC=$?"
+
+# Test: valid -Os / -Oz
+"$EXE" test.ll "$TMP_DIR/t_os" -Os >/dev/null 2>&1
+[ $? -eq 0 ] && pass "Valid -Os -> RC=0" || fail "Valid -Os -> RC=$?"
+"$EXE" test.ll "$TMP_DIR/t_oz" -Oz >/dev/null 2>&1
+[ $? -eq 0 ] && pass "Valid -Oz -> RC=0" || fail "Valid -Oz -> RC=$?"
+
+# Test: bad --targets values
+"$EXE" test.ll "$TMP_DIR/t_badt" --targets= >/dev/null 2>&1
+[ $? -eq 1 ] && pass "Empty --targets -> RC=1" || fail "Empty --targets -> RC=$?"
+"$EXE" test.ll "$TMP_DIR/t_badt2" --targets=@nonexistent_targets_file.txt >/dev/null 2>&1
+[ $? -eq 1 ] && pass "Missing @targets file -> RC=1" || fail "Missing @targets file -> RC=$?"
+
+# Test: --compare needs two args
+"$EXE" --compare >/dev/null 2>&1
+[ $? -eq 1 ] && pass "--compare without args -> RC=1" || fail "--compare without args -> RC=$?"
 
 # Test: valid with snapshots
 "$EXE" test.ll "$TMP_DIR/t_snap" -O2 --snapshots >/dev/null 2>&1
@@ -110,6 +132,233 @@ if [ -f "$TMP_DIR/t_json/history.json" ]; then
 else
     fail "JSON file not created"
 fi
+
+# Test: --compare parses the final event (regression test for last-event drop)
+# Single-event fixtures where the ONLY event is also the last one: old parser
+# dropped it, so BarPass would never appear in the output.
+COMPARE_BASE="$TMP_DIR/cmp_base.json"
+COMPARE_CURR="$TMP_DIR/cmp_curr.json"
+cat > "$COMPARE_BASE" <<'JSONEOF'
+{
+  "module_name": "test.ll",
+  "pipeline": "O2",
+  "events": [
+    {
+      "id": 1,
+      "event_type": "after",
+      "pass_name": "BarPass",
+      "pass_type": "transformation",
+      "ir_kind": "Module",
+      "ir_name": "test",
+      "depth": 0,
+      "metrics_before": {
+        "instruction_count": 50,
+        "basic_block_count": 5,
+        "function_count": 1,
+        "global_count": 0,
+        "call_count": 0,
+        "load_count": 0,
+        "store_count": 0,
+        "branch_count": 1,
+        "phi_count": 0,
+        "return_count": 1
+      },
+      "metrics_after": {
+        "instruction_count": 40,
+        "basic_block_count": 5,
+        "function_count": 1,
+        "global_count": 0,
+        "call_count": 0,
+        "load_count": 0,
+        "store_count": 0,
+        "branch_count": 1,
+        "phi_count": 0,
+        "return_count": 1
+      },
+      "has_changes": true,
+      "ir_before": null,
+      "ir_after": null
+    }
+  ],
+  "summary": {
+    "total_events": 1,
+    "total_before": 0,
+    "total_after": 1,
+    "total_invalidated": 0,
+    "passes_with_changes": 1,
+    "unique_pass_names": 1,
+    "total_instructions_before": 150,
+    "total_instructions_after": 100,
+    "total_bbs_before": 10,
+    "total_bbs_after": 10,
+    "codegen_asm_lines_before": 50,
+    "codegen_asm_lines_after": 50,
+    "codegen_asm_bytes_before": 500,
+    "codegen_asm_bytes_after": 500,
+    "codegen_error_before": null,
+    "codegen_error_after": null,
+    "codegen_targets": {},
+    "optnone_detected": false,
+    "optnone_function_count": 0,
+    "optnone_functions": [],
+    "optnone_warning": ""
+  }
+}
+JSONEOF
+cat > "$COMPARE_CURR" <<'JSONEOF'
+{
+  "module_name": "test.ll",
+  "pipeline": "O2",
+  "events": [
+    {
+      "id": 1,
+      "event_type": "after",
+      "pass_name": "BarPass",
+      "pass_type": "transformation",
+      "ir_kind": "Module",
+      "ir_name": "test",
+      "depth": 0,
+      "metrics_before": {
+        "instruction_count": 50,
+        "basic_block_count": 5,
+        "function_count": 1,
+        "global_count": 0,
+        "call_count": 0,
+        "load_count": 0,
+        "store_count": 0,
+        "branch_count": 1,
+        "phi_count": 0,
+        "return_count": 1
+      },
+      "metrics_after": {
+        "instruction_count": 80,
+        "basic_block_count": 5,
+        "function_count": 1,
+        "global_count": 0,
+        "call_count": 0,
+        "load_count": 0,
+        "store_count": 0,
+        "branch_count": 1,
+        "phi_count": 0,
+        "return_count": 1
+      },
+      "has_changes": true,
+      "ir_before": null,
+      "ir_after": null
+    }
+  ],
+  "summary": {
+    "total_events": 1,
+    "total_before": 0,
+    "total_after": 1,
+    "total_invalidated": 0,
+    "passes_with_changes": 1,
+    "unique_pass_names": 1,
+    "total_instructions_before": 150,
+    "total_instructions_after": 100,
+    "total_bbs_before": 10,
+    "total_bbs_after": 10,
+    "codegen_asm_lines_before": 50,
+    "codegen_asm_lines_after": 50,
+    "codegen_asm_bytes_before": 500,
+    "codegen_asm_bytes_after": 500,
+    "codegen_error_before": null,
+    "codegen_error_after": null,
+    "codegen_targets": {},
+    "optnone_detected": false,
+    "optnone_function_count": 0,
+    "optnone_functions": [],
+    "optnone_warning": ""
+  }
+}
+JSONEOF
+COMPARE_OUT=$("$EXE" --compare "$COMPARE_BASE" "$COMPARE_CURR" 2>&1)
+if echo "$COMPARE_OUT" | grep -q "BarPass"; then
+    pass "--compare parses final event (last-event fix verified)"
+else
+    fail "--compare missed final event (last-event parse bug)"
+fi
+rm -f "$COMPARE_BASE" "$COMPARE_CURR"
+
+# Test: --compare with empty events array + per-target codegen
+# Covers single-line "events": [] (must not swallow the summary) and
+# per-target findings (regression + new/removed targets).
+COMPARE_TBASE="$TMP_DIR/cmp_t_base.json"
+COMPARE_TCURR="$TMP_DIR/cmp_t_curr.json"
+write_target_fixture() {
+    local file="$1" aarch_after="$2" extra_target_json="$3"
+    cat > "$file" <<JSONEOF
+{
+  "module_name": "t.ll",
+  "pipeline": "O2",
+  "events": [],
+  "summary": {
+    "total_events": 0,
+    "total_before": 0,
+    "total_after": 0,
+    "total_invalidated": 0,
+    "passes_with_changes": 0,
+    "unique_pass_names": 0,
+    "total_instructions_before": 100,
+    "total_instructions_after": 100,
+    "total_bbs_before": 10,
+    "total_bbs_after": 10,
+    "codegen_asm_lines_before": 100,
+    "codegen_asm_lines_after": 100,
+    "codegen_asm_bytes_before": 1000,
+    "codegen_asm_bytes_after": 1000,
+    "codegen_error_before": null,
+    "codegen_error_after": null,
+    "codegen_targets": {
+      "x86_64-pc-windows-msvc": {
+        "asm_lines_before": 100,
+        "asm_lines_after": 90,
+        "asm_bytes_before": 1000,
+        "asm_bytes_after": 900,
+        "error": null
+      },
+      "aarch64-unknown-linux-gnu": {
+        "asm_lines_before": 100,
+        "asm_lines_after": $aarch_after,
+        "asm_bytes_before": 1000,
+        "asm_bytes_after": 900,
+        "error": null
+      }$extra_target_json
+    },
+    "optnone_detected": false,
+    "optnone_function_count": 0,
+    "optnone_functions": [],
+    "optnone_warning": ""
+  }
+}
+JSONEOF
+}
+write_target_fixture "$COMPARE_TBASE" 90 ""
+write_target_fixture "$COMPARE_TCURR" 99 ",
+      \"new-target\": {
+        \"asm_lines_before\": 50,
+        \"asm_lines_after\": 40,
+        \"asm_bytes_before\": 500,
+        \"asm_bytes_after\": 400,
+        \"error\": null
+      }"
+COMPARE_TOUT=$("$EXE" --compare "$COMPARE_TBASE" "$COMPARE_TCURR" 2>&1)
+if echo "$COMPARE_TOUT" | grep -q "aarch64-unknown-linux-gnu codegen regression"; then
+    pass "--compare per-target regression detected"
+else
+    fail "--compare missed per-target regression"
+fi
+if echo "$COMPARE_TOUT" | grep -q "new-target"; then
+    pass "--compare new target detected"
+else
+    fail "--compare missed new target"
+fi
+if echo "$COMPARE_TOUT" | grep -q "Instructions (after):  100 -> 100"; then
+    pass "--compare empty events array leaves summary intact"
+else
+    fail "--compare summary lost with empty events array"
+fi
+rm -f "$COMPARE_TBASE" "$COMPARE_TCURR"
 echo "" | tee -a "$REPORT"
 
 # -------------------------------------------------------
@@ -119,6 +368,10 @@ echo "Phase 3: Fuzz Testing (300 iterations)" | tee -a "$REPORT"
 
 CRASH_COUNT=0
 TIMEOUT_COUNT=0
+CORRUPT_COUNT=0
+
+HAVE_PY=0
+command -v python3 &>/dev/null && HAVE_PY=1
 
 for i in $(seq 1 300); do
     MUTANT="$TMP_DIR/fuzz_$i.ll"
@@ -136,13 +389,32 @@ for i in $(seq 1 300); do
     mkdir -p "$OUT"
     timeout 15 "$EXE" "$MUTANT" "$OUT" -O2 >/dev/null 2>&1
     RC=$?
-    [ $RC -eq 124 ] && TIMEOUT_COUNT=$((TIMEOUT_COUNT + 1))
+    if [ $RC -eq 124 ]; then
+        TIMEOUT_COUNT=$((TIMEOUT_COUNT + 1))
+    elif [ $RC -ne 0 ] && [ $RC -ne 1 ]; then
+        # Only RC=0 (success) and RC=1 (bad input) are expected;
+        # anything else (segfault/abort/...) is a crash.
+        CRASH_COUNT=$((CRASH_COUNT + 1))
+        echo "  [FUZZ-CRASH] iter $i RC=$RC" | tee -a "$REPORT"
+    elif [ $RC -eq 0 ]; then
+        # Success must produce valid JSON
+        if [ ! -f "$OUT/history.json" ]; then
+            CORRUPT_COUNT=$((CORRUPT_COUNT + 1))
+            echo "  [FUZZ-CORRUPT] iter $i missing history.json" | tee -a "$REPORT"
+        elif [ $HAVE_PY -eq 1 ]; then
+            if ! python3 -c "import json; json.load(open(\"$OUT/history.json\"))" >/dev/null 2>&1; then
+                CORRUPT_COUNT=$((CORRUPT_COUNT + 1))
+                echo "  [FUZZ-CORRUPT] iter $i invalid history.json" | tee -a "$REPORT"
+            fi
+        fi
+    fi
     rm -f "$MUTANT"
     rm -rf "$OUT"
 done
 
 [ $CRASH_COUNT -eq 0 ] && pass "Fuzz: 0 crashes in 300 iterations" || fail "Fuzz: $CRASH_COUNT crashes detected"
 [ $TIMEOUT_COUNT -eq 0 ] && pass "Fuzz: 0 timeouts in 300 iterations" || fail "Fuzz: $TIMEOUT_COUNT timeouts detected"
+[ $CORRUPT_COUNT -eq 0 ] && pass "Fuzz: 0 corrupt outputs in 300 iterations" || fail "Fuzz: $CORRUPT_COUNT corrupt outputs detected"
 echo "" | tee -a "$REPORT"
 
 # -------------------------------------------------------
@@ -151,6 +423,34 @@ echo "" | tee -a "$REPORT"
 echo "Phase 4: Static Analysis (clang-tidy)" | tee -a "$REPORT"
 echo "  (Run 'bash tests/run_clang_tidy.sh' for full report)" | tee -a "$REPORT"
 echo "  Skipping in automated run (requires LLVM headers)" | tee -a "$REPORT"
+echo "" | tee -a "$REPORT"
+
+# -------------------------------------------------------
+# Phase 5: Ground-truth proof + cross-validation
+# -------------------------------------------------------
+echo "Phase 5: Ground-truth proof (judge_proof.sh)" | tee -a "$REPORT"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -x "$SCRIPT_DIR/judge_proof.sh" ] || [ -f "$SCRIPT_DIR/judge_proof.sh" ]; then
+    if bash "$SCRIPT_DIR/judge_proof.sh" "$BUILD_DIR" >/dev/null 2>&1; then
+        pass "judge_proof.sh: tiny_proof.ll ground truth matches"
+    else
+        fail "judge_proof.sh: ground truth mismatch (see judge output)"
+    fi
+else
+    echo "  [SKIP] judge_proof.sh not found" | tee -a "$REPORT"
+fi
+echo "" | tee -a "$REPORT"
+
+echo "Phase 6: Cross-validation (validate_correctness.sh)" | tee -a "$REPORT"
+if [ -f "$SCRIPT_DIR/validate_correctness.sh" ]; then
+    if bash "$SCRIPT_DIR/validate_correctness.sh" "$BUILD_DIR" test.ll >/dev/null 2>&1; then
+        pass "validate_correctness.sh: independent recount + determinism"
+    else
+        fail "validate_correctness.sh failed (see tests/correctness_report.txt)"
+    fi
+else
+    echo "  [SKIP] validate_correctness.sh not found" | tee -a "$REPORT"
+fi
 echo "" | tee -a "$REPORT"
 
 # -------------------------------------------------------

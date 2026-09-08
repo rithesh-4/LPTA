@@ -41,7 +41,7 @@ opt -O2 -print-before-all -print-after-all demo_input.ll 2>&1 | head -60
 ```bash
 bash run_lpta.sh demo_input.ll --snapshots --targets=common
 ```
-> "LPTA is a single command. It instruments LLVM's optimization pipeline using PassInstrumentationCallbacks, records IR state before and after every pass, computes structural metrics, measures final codegen across three architectures, and generates an interactive dashboard."
+> "LPTA is a single command. It instruments LLVM's optimization pipeline using PassInstrumentationCallbacks, records before/after metrics for every pass, hashes IR to catch changes counters miss, measures final codegen size across three architectures, and generates an interactive dashboard."
 
 **[1:30] Watch it run — point out key output**
 > "Notice: 1,756 events recorded across 102 passes that made changes. Stack remaining: 0 — the instrumented pass stack is balanced. Cross-target codegen: x86_64, aarch64, and riscv64 — we'll see how the same optimization pipeline produces different assembly for each architecture."
@@ -50,7 +50,7 @@ bash run_lpta.sh demo_input.ll --snapshots --targets=common
 ```bash
 ls -la report/
 ```
-> "We get a structured history.json — the full trace — plus before/after IR, codegen assembly for each target, and IR snapshots for every pass that changed the program."
+> "We get a structured history.json — the full trace — plus before/after IR, codegen assembly for each target, and IR snapshots for allowlisted passes whose IR actually changed."
 
 ---
 
@@ -184,7 +184,7 @@ build/lpta_test.exe --compare demo_current/history.json demo_cross/history.json
 ```bash
 build/test_utilities.exe 2>&1 | tail -5
 ```
-> "57 unit tests pass. The tool is deterministic — same input produces byte-identical output. The test suite includes hand-verified ground truth, fuzz testing, and cross-validation against LLVM's own opt -stats."
+> "72 unit tests pass. The tool is deterministic — same input produces byte-identical output. The test suite includes hand-verified ground truth, fuzz testing, and cross-validation against LLVM's own opt -stats."
 
 **[9:40] Summary**
 > "LPTA gives compiler developers and performance engineers an explainable, evidence-backed view of LLVM's optimization pipeline: which passes ran, what they changed, how significant each change was, cross-target codegen impact, and regression detection between runs. It turns manual, multi-stage IR comparison into a repeatable workflow."

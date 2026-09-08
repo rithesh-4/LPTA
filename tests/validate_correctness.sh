@@ -5,7 +5,7 @@
 # PROVES the numbers LPTA reports are accurate by cross-checking
 # against THREE independent sources:
 #
-#   1. Manual IR parsing (grep-based element counting)
+#   1. Independent IR parsing (Python-based element counting)
 #   2. LLVM's own `opt -stats` output
 #   3. Determinism (run twice, identical output)
 #
@@ -46,37 +46,55 @@ with open('$TEST_FILE') as f:
 
 funcs = bbs = instrs = calls = loads = stores = branches = phis = rets = globals_ct = 0
 in_func = False
-seen_first_label = False
+body = []
+label_re = re.compile(r'^\s*[a-zA-Z0-9_.]+:')
+op_re = re.compile(r'^\s*(?:%[^\s=]+\s*=\s*)?([A-Za-z][\w.]*)\b')
+
+def flush():
+    global bbs, instrs, calls, loads, stores, branches, phis, rets, body
+    if not body:
+        return
+    bbs += len([l for l in body if label_re.match(l)])
+    if not label_re.match(body[0]):
+        bbs += 1  # anonymous entry block has no label
+    for l in body:
+        code = l.split(';', 1)[0]
+        if not code.strip() or label_re.match(l):
+            continue
+        m = op_re.match(code)
+        if not m:
+            continue
+        instrs += 1
+        op = m.group(1)
+        if op in ('call', 'invoke', 'callbr', 'tail', 'musttail'):
+            calls += 1
+        elif op == 'load':
+            loads += 1
+        elif op == 'store':
+            stores += 1
+        elif op in ('br', 'switch', 'indirectbr'):
+            branches += 1
+        elif op == 'phi':
+            phis += 1
+        elif op == 'ret':
+            rets += 1
+    body = []
 
 for line in lines:
     sline = line.strip()
     if line.startswith('define '):
         in_func = True
-        seen_first_label = False
         funcs += 1
-        bbs += 1
+        body = []
     elif line.startswith('}'):
+        flush()
         in_func = False
     elif line.startswith('@') and '=' in line:
         globals_ct += 1
     elif in_func:
-        m = re.match(r'^\s*([a-zA-Z0-9_.]+):', line)
-        if m:
-            if not seen_first_label:
-                seen_first_label = True
-            else:
-                bbs += 1
-        else:
-            # Check if line contains an opcode
-            # Exclude metadata, comments, braces, labels
-            if '=' in line or re.match(r'^\s*(br|ret|store|switch|call|tail call|musttail call|indirectcall)\b', line):
-                instrs += 1
-                if re.search(r'\bcall\b|\binvoke\b|\bcallbr\b', line): calls += 1
-                if re.search(r'\bload\b', line): loads += 1
-                if re.search(r'\bstore\b', line): stores += 1
-                if re.search(r'\bbr\b', line): branches += 1
-                if re.search(r'\bphi\b', line): phis += 1
-                if re.search(r'\bret\b', line): rets += 1
+        if sline == '' or sline.startswith(';'):
+            continue
+        body.append(line)
 
 print(f'GT_FUNCTIONS={funcs}')
 print(f'GT_BBS={bbs}')
@@ -92,7 +110,7 @@ print(f'GT_GLOBALS={globals_ct}')
 
 eval "$GT_COUNTS"
 
-info "Ground truth (grep-based):"
+info "Ground truth (independent Python IR parser):"
 info "  Functions:     $GT_FUNCTIONS"
 info "  Basic blocks:  $GT_BBS"
 info "  Instructions:  $GT_INSTRUCTIONS"
@@ -204,23 +222,22 @@ echo "" | tee -a "$REPORT"
 # ============================================================
 # Comparison: LPTA vs Ground Truth
 # ============================================================
-echo "Cross-Check: LPTA vs Ground Truth (grep)" | tee -a "$REPORT"
+echo "Cross-Check: LPTA vs Ground Truth (independent parser)" | tee -a "$REPORT"
 
 compare() {
     local label="$1" lpta="$2" gt="$3"
-    # Allow grep-based counting to be >= LPTA's count (grep may overcount due to comments)
-    # but LPTA's count should never exceed grep's count for instructions
+    # Ground truth uses an independent Python IR parser (not LPTA's C++
+    # counters), so counts must match exactly. A mismatch means either
+    # LPTA miscounts or the GT parser disagrees — both warrant investigation.
     if [ "$lpta" = "$gt" ]; then
         pass "$label: LPTA=$lpta, GT=$gt (EXACT MATCH)"
-    elif [ "$lpta" -le "$gt" ]; then
-        # LPTA is <= grep: likely grep overcounted comments/strings — acceptable
-        pass "$label: LPTA=$lpta, GT=$gt (LPTA subset of GT — grep overcount OK)"
     else
-        fail "$label: LPTA=$lpta, GT=$gt (LPTA exceeds GT — INVESTIGATE)"
+        fail "$label: LPTA=$lpta, GT=$gt (MISMATCH — INVESTIGATE)"
     fi
 }
 
 compare "Functions"     "$LPTA_FUNCTIONS"     "$GT_FUNCTIONS"
+compare "Basic blocks"  "$LPTA_BBS"           "$GT_BBS"
 compare "Instructions"  "$LPTA_INSTRUCTIONS"   "$GT_INSTRUCTIONS"
 compare "Calls"         "$LPTA_CALLS"          "$GT_CALLS"
 compare "Loads"         "$LPTA_LOADS"          "$GT_LOADS"
@@ -228,6 +245,7 @@ compare "Stores"        "$LPTA_STORES"         "$GT_STORES"
 compare "Branches"      "$LPTA_BRANCHES"       "$GT_BRANCHES"
 compare "PHIs"          "$LPTA_PHIS"           "$GT_PHIS"
 compare "Returns"       "$LPTA_RETURNS"        "$GT_RETURNS"
+compare "Globals"       "$LPTA_GLOBALS"        "$GT_GLOBALS"
 echo "" | tee -a "$REPORT"
 
 # ============================================================
@@ -319,15 +337,6 @@ else
         fail "Determinism: history.json DIFFERS between runs"
         diff "$OUT_DIR/history.json" "$OUT_DIR_2/history.json" | head -20 | tee -a "$REPORT"
     fi
-    
-    # Compare console output (strip timestamps/pids if any)
-    if diff -q <(grep "^\[" "$OUT_DIR/run1_stderr.txt" 2>/dev/null) \
-               <(grep "^\[" "$OUT_DIR_2/run1_stderr.txt" 2>/dev/null) >/dev/null 2>&1; then
-        pass "Determinism: identical console output across two runs"
-    else
-        # Console output is fine to differ slightly (order of stderr)
-        pass "Determinism: JSON output verified (console may vary in ordering)"
-    fi
 fi
 echo "" | tee -a "$REPORT"
 
@@ -401,6 +410,23 @@ for key in ['codegen_asm_lines_before', 'codegen_asm_lines_after', 'codegen_asm_
     if key not in s:
         errors.append(f'summary missing codegen field: {key}')
 
+# 7. Opcode-group partition: groups sum to instruction_count in every event
+OP_KEYS = ['op_arith', 'op_cmp', 'op_memory', 'op_control',
+           'op_cast', 'op_call', 'op_vector', 'op_other']
+for e in events:
+    for mkey in (['metrics'] if 'metrics' in e else []) + \
+                (['metrics_before', 'metrics_after'] if e['event_type'] == 'after' else []):
+        m = e.get(mkey, {})
+        if any(k not in m for k in OP_KEYS):
+            errors.append(f'event {e["id"]}: {mkey} missing opcode-group keys')
+        elif sum(m[k] for k in OP_KEYS) != m.get('instruction_count', 0):
+            errors.append(f'event {e["id"]}: opcode groups do not sum to instruction_count in {mkey}')
+
+# 8. ir_changed is a bool on every after event (old files may lack it -> treated false)
+for e in events:
+    if e['event_type'] == 'after' and 'ir_changed' in e and not isinstance(e['ir_changed'], bool):
+        errors.append(f'event {e["id"]}: ir_changed is not a bool')
+
 if errors:
     for e in errors:
         print(f'FAIL: {e}', file=sys.stderr)
@@ -413,6 +439,8 @@ else:
     print(f'  - Event IDs sequential and unique')
     print(f'  - Every before event paired with after or invalidated')
     print(f'  - Codegen fields present in summary')
+    print(f'  - Opcode groups partition instruction_count in every event')
+    print(f'  - ir_changed present and boolean on after events')
     sys.exit(0)
 " 2>&1
 
