@@ -838,7 +838,13 @@ int main(int argc, char **argv) {
     {
         std::vector<std::string> args;
         for (int i = 1; i < argc; i++) args.push_back(argv[i]);
+        bool end_of_flags = false;
         for (size_t i = 0; i < args.size(); i++) {
+            if (!end_of_flags && args[i] == "--") {
+                end_of_flags = true;
+                continue;
+            }
+            if (end_of_flags) continue;  // positional (e.g. a file named --compare)
             if (args[i] == "--version" || args[i] == "-version") {
                 outs() << "lpta_test (LLVM " << LLVM_VERSION_STRING << ")\n";
                 return 0;
@@ -892,7 +898,7 @@ int main(int argc, char **argv) {
                 return 1;
             }
             if (targets_arg == "common") {
-                g_target_triples.assign(COMMON_TARGETS.begin(), COMMON_TARGETS.end());
+                for (auto &t : COMMON_TARGETS) g_target_triples.push_back(t);
             } else if (targets_arg.rfind("@", 0) == 0) {
                 // File-based: --targets=@targets.txt
                 std::string filename = trimCopy(targets_arg.substr(1));
