@@ -221,6 +221,17 @@ else
 fi
 
 if [ -n "$OPT" ]; then
+    # Guard: opt must come from the same LLVM major series LPTA was built
+    # against — otherwise pipeline differences fail spuriously on demo day.
+    LPTA_MAJOR=$("$EXE" --version 2>/dev/null | grep -oE "[0-9]+" | head -1)
+    OPT_MAJOR=$("$OPT" --version 2>/dev/null | grep -oE "[0-9]+" | head -1)
+    if [ -n "$LPTA_MAJOR" ] && [ -n "$OPT_MAJOR" ] && [ "$LPTA_MAJOR" != "$OPT_MAJOR" ]; then
+        info "opt is LLVM $OPT_MAJOR but LPTA was built against LLVM $LPTA_MAJOR — skipping version-sensitive checks"
+        OPT=""
+    fi
+fi
+
+if [ -n "$OPT" ]; then
     # Run opt with -O2 and -stats to get LLVM's own instruction count
     OPT_STATS=$("$OPT" -O2 -stats -disable-output "$TEST_FILE" 2>&1)
     # Extract the "X instructions" line from opt's stderr stats

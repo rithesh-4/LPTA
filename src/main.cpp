@@ -19,6 +19,7 @@
 #include "llvm/Passes/PassBuilder.h"
 
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/SourceMgr.h"
@@ -838,6 +839,10 @@ int main(int argc, char **argv) {
         std::vector<std::string> args;
         for (int i = 1; i < argc; i++) args.push_back(argv[i]);
         for (size_t i = 0; i < args.size(); i++) {
+            if (args[i] == "--version" || args[i] == "-version") {
+                outs() << "lpta_test (LLVM " << LLVM_VERSION_STRING << ")\n";
+                return 0;
+            }
             if (args[i] == "--compare") {
                 if (i + 2 >= args.size()) {
                     errs() << "ERROR: --compare requires two arguments: <base.json> <curr.json>\n";

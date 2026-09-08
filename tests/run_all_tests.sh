@@ -112,6 +112,13 @@ head -5 test.ll > "$TMP_DIR/t_truncated.ll"
 "$EXE" --compare >/dev/null 2>&1
 [ $? -eq 1 ] && pass "--compare without args -> RC=1" || fail "--compare without args -> RC=$?"
 
+# Test: --version prints LLVM version
+if "$EXE" --version 2>/dev/null | grep -qE "[0-9]+\.[0-9]+"; then
+    pass "--version reports LLVM version"
+else
+    fail "--version missing version number"
+fi
+
 # Test: valid with snapshots
 "$EXE" test.ll "$TMP_DIR/t_snap" -O2 --snapshots >/dev/null 2>&1
 [ $? -eq 0 ] && pass "Valid with --snapshots -> RC=0" || fail "Valid with --snapshots -> RC=$?"
