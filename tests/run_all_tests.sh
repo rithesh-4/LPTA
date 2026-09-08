@@ -393,7 +393,16 @@ for i in $(seq 1 300); do
     
     OUT="$TMP_DIR/fuzz_out_$i"
     mkdir -p "$OUT"
-    timeout 15 "$EXE" "$MUTANT" "$OUT" -O2 >/dev/null 2>&1
+    # Vary flags so snapshot/cap, size-opt, and multi-target paths get
+    # fuzzed too — not just the default -O2 run.
+    case $((i % 10)) in
+        0) FUZZ_FLAGS="--snapshots" ;;
+        1) FUZZ_FLAGS="-Os" ;;
+        2) FUZZ_FLAGS="--targets=common" ;;
+        *) FUZZ_FLAGS="" ;;
+    esac
+    # shellcheck disable=SC2086: intentional word splitting of FUZZ_FLAGS
+    timeout 20 "$EXE" "$MUTANT" "$OUT" -O2 $FUZZ_FLAGS >/dev/null 2>&1
     RC=$?
     if [ $RC -eq 124 ]; then
         TIMEOUT_COUNT=$((TIMEOUT_COUNT + 1))
