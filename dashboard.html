@@ -595,12 +595,26 @@ function animateValue(el,end,dur=700){
 }
 
 // ===== LOAD =====
+function loadError(msg){
+  document.getElementById('events').innerHTML='<div style="padding:80px;text-align:center;color:var(--text-muted)">'+msg+'</div>';
+  document.getElementById('overview-cards').innerHTML='<div style="padding:80px;text-align:center;color:var(--text-muted);grid-column:1/-1">'+msg+'</div>';
+}
 async function load(){
-  try{const r=await fetch('history.json');if(!r.ok)throw 0;D=await r.json();eventMap=null;render()}
+  try{
+    const r=await fetch('history.json');if(!r.ok)throw 0;D=await r.json();
+    // Guard against foreign/hand-made JSON: every render path assumes an
+    // events array and a summary object.
+    if(!D||!Array.isArray(D.events)||typeof D.summary!=='object'||!D.summary)
+      throw new Error('bad-shape');
+    eventMap=null;render();
+  }
   catch(e){
+    if(e&&e.message==='bad-shape'){
+      loadError('This history.json is not a valid LPTA report (missing <code>events</code> array or <code>summary</code> object). Re-run <code>lpta_test</code> to regenerate it.');
+      D=null;return;
+    }
     const msg='Could not load history.json. Serve with: <code style="background:var(--bg-tertiary);padding:3px 10px;border-radius:6px">python -m http.server 8080</code>';
-    document.getElementById('events').innerHTML='<div style="padding:80px;text-align:center;color:var(--text-muted)">'+msg+'</div>';
-    document.getElementById('overview-cards').innerHTML='<div style="padding:80px;text-align:center;color:var(--text-muted);grid-column:1/-1">'+msg+'</div>';
+    loadError(msg);
   }
 }
 

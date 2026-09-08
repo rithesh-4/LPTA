@@ -14,6 +14,11 @@ std::string sanitizeFilename(const std::string& s) {
         }
     }
     if (r.empty()) r = "unnamed";
+    // Cap length so composed snapshot paths (pass_<id>_<pass>_<kind>_<name>_
+    // {before,after}.ll) stay well under filesystem limits (e.g. Windows
+    // MAX_PATH 260). Mangled C++ symbols can be thousands of chars.
+    static constexpr size_t kMaxNameLen = 120;
+    if (r.size() > kMaxNameLen) r.resize(kMaxNameLen);
     // Formal verification
     // Note: collision possible if two different targets sanitize to the same name
     // (e.g. "my target" and "my_target" both -> "my_target"). Avoid by using

@@ -66,11 +66,11 @@ void writeMetricsJSON(std::ostream &os, const IRMetrics &m, const std::string &p
        << pad << "\"op_other\": " << m.op_other << "\n";
 }
 
-void writeHistoryJSON(const std::string &filename, const CodegenResult &cg) {
+bool writeHistoryJSON(const std::string &filename, const CodegenResult &cg) {
     std::ofstream f(filename);
     if (!f.is_open()) {
         errs() << "ERROR: could not open " << filename << "\n";
-        return;
+        return false;
     }
 
     // Summary stats
@@ -245,8 +245,9 @@ void writeHistoryJSON(const std::string &filename, const CodegenResult &cg) {
     if (!f.good()) {
         errs() << "ERROR: I/O failure while writing " << filename
                << " (disk full?)\n";
-        return;
+        return false;
     }
     f.close();
     errs() << "Wrote " << filename << " (" << g_events.size() << " events)\n";
+    return true;
 }

@@ -248,6 +248,14 @@ void test_sanitize_angle() {
           "sanitizeFilename: angle brackets replaced");
 }
 
+void test_sanitize_length_cap() {
+    std::string long_name(500, 'a');
+    std::string r = sanitizeFilename(long_name);
+    CHECK(r.size() <= 120, "sanitizeFilename: long names truncated to cap");
+    CHECK(r == sanitizeFilename(long_name), "sanitizeFilename: truncation deterministic");
+    CHECK(sanitizeFilename("short") == "short", "sanitizeFilename: short names untouched");
+}
+
 // ============================================================
 // shouldSnapshot
 // ============================================================
@@ -540,6 +548,7 @@ int main() {
     test_sanitize_empty();
     test_sanitize_dots();
     test_sanitize_angle();
+    test_sanitize_length_cap();
 
     printf("\nshouldSnapshot / allowlist:\n");
     test_snapshot_default_off();

@@ -52,6 +52,7 @@ void saveIRSnapshot(const std::string &suffix, const Any &IR,
         std::error_code EC;
         raw_fd_ostream file(fn, EC);
         if (!EC) (*Mod)->print(file, nullptr);
+        else errs() << "  WARNING: could not write snapshot file '" << fn << "': " << EC.message() << "\n";
     } else if (auto *F = any_cast<const Function *>(&IR)) {
         std::string func_name = sanitizeFilename((*F)->getName().str());
         std::string pn = sanitizeFilename(pass_name);
@@ -60,6 +61,7 @@ void saveIRSnapshot(const std::string &suffix, const Any &IR,
         std::error_code EC;
         raw_fd_ostream file(fn, EC);
         if (!EC) (*F)->print(file);
+        else errs() << "  WARNING: could not write snapshot file '" << fn << "': " << EC.message() << "\n";
     } else if (auto *L = any_cast<const Loop *>(&IR)) {
         std::string loop_name = "unknown";
         if (auto *Header = (*L)->getHeader())
@@ -74,6 +76,8 @@ void saveIRSnapshot(const std::string &suffix, const Any &IR,
                 BB->print(file);
                 file << "\n";
             }
+        } else {
+            errs() << "  WARNING: could not write snapshot file '" << fn << "': " << EC.message() << "\n";
         }
     }
 }

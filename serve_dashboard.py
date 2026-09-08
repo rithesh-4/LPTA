@@ -58,8 +58,12 @@ def load_config():
                 with open(path, "r") as f:
                     config = json.load(f)
                     break
-            except (json.JSONDecodeError, OSError):
-                pass
+            except json.JSONDecodeError as e:
+                print(f"  WARNING: ignoring malformed config {path}: {e}",
+                      file=sys.stderr)
+            except OSError as e:
+                print(f"  WARNING: cannot read config {path}: {e}",
+                      file=sys.stderr)
     return config
 
 

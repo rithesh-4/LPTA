@@ -987,13 +987,8 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    std::error_code ec;
-    fs::create_directories(g_output_dir, ec);
-    if (ec) {
-        errs() << "ERROR: could not create output directory '" << g_output_dir
-               << "': " << ec.message() << "\n";
-        return 1;
-    }
+    // NOTE: output dir is created only after the input parses (below), so
+    // failed runs don't litter empty report directories.
 
     // Parse IR — empty .ll must succeed (AGENTS invariant: empty = exit 0)
     LLVMContext Context;
@@ -1042,6 +1037,17 @@ int main(int argc, char **argv) {
     // Use basename for determinism (M3 fix: absolute path would leak into history.json)
     g_module_name = fs::path(M->getName().str().empty() ? input_file : M->getName().str()).filename().string();
     if (g_module_name.empty()) g_module_name = fs::path(input_file).filename().string();
+
+    // Input parsed OK — now create the output directory.
+    {
+        std::error_code ec;
+        fs::create_directories(g_output_dir, ec);
+        if (ec) {
+            errs() << "ERROR: could not create output directory '" << g_output_dir
+                   << "': " << ec.message() << "\n";
+            return 1;
+        }
+    }
 
     // ============================================================
     // Detect optnone functions
@@ -1484,8 +1490,10 @@ int main(int argc, char **argv) {
     }
     errs() << "=================================\n";
 
-    // Write JSON output (pass codegen result)
-    writeHistoryJSON(g_output_dir + "/history.json", cg);
+    // Write JSON output (pass codegen result). A run without history.json
+    // is a failed run, even if the pipeline itself succeeded.
+    bool wrote_json = writeHistoryJSON(g_output_dir + "/history.json", cg);
 
+    if (!wrote_json) return 1;
     return stack_unbalanced ? 1 : 0;
 }
