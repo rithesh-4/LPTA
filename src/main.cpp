@@ -1061,7 +1061,16 @@ int main(int argc, char **argv) {
     // scripts. Without this, a run with fewer snapshots/targets leaves
     // orphans behind that look like current output. history.json and the
     // before/after IR are overwritten below, so they need no cleanup.
+    // Never sweep the current working directory itself (report_dir=.):
+    // patterns like codegen_*.s could match user files there.
     {
+        std::error_code ec_eq, ec_cwd;
+        auto cwd = fs::current_path(ec_cwd);
+        bool is_cwd = !ec_cwd && !ec_eq &&
+                      fs::equivalent(g_output_dir, cwd, ec_eq);
+        if (is_cwd) {
+            errs() << "  NOTE: output is the working directory; skipping stale-file sweep\n";
+        } else {
         auto ends_with = [](const std::string &s, const char *suf) {
             std::string su(suf);
             return s.size() >= su.size() &&
@@ -1087,6 +1096,7 @@ int main(int argc, char **argv) {
                 }
             }
         }
+        }  // end else (not CWD): stale sweep
     }
 
     // ============================================================
