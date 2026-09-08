@@ -142,7 +142,7 @@ flowchart LR
         JW["JsonWriter.cpp<br/>escape → history.json"]
     end
 
-    TEST["tests/test_utilities.cpp<br/>72 unit tests"]
+    TEST["tests/test_utilities.cpp<br/>75 unit tests"]
 
     MAIN -->|"detectIR(IR)"| DETC
     DETC --> METC
