@@ -115,6 +115,12 @@ head -5 test.ll > "$TMP_DIR/t_truncated.ll"
 # Test: valid with snapshots
 "$EXE" test.ll "$TMP_DIR/t_snap" -O2 --snapshots >/dev/null 2>&1
 [ $? -eq 0 ] && pass "Valid with --snapshots -> RC=0" || fail "Valid with --snapshots -> RC=$?"
+# Snapshots must actually retain IR text (not just run clean)
+if grep -q '"ir_before": "' "$TMP_DIR/t_snap/history.json" 2>/dev/null; then
+    pass "--snapshots retains IR text in history.json"
+else
+    fail "--snapshots produced no IR text (diffs would be empty)"
+fi
 
 # Test: real test file
 "$EXE" real_test.ll "$TMP_DIR/t_real" -O2 >/dev/null 2>&1

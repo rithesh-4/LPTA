@@ -1524,10 +1524,17 @@ int main(int argc, char **argv) {
     errs() << "\n";
 
     // Count passes with changes
-    unsigned changed = 0;
-    for (auto &e : g_events)
+    unsigned changed = 0, snap_kept = 0;
+    for (auto &e : g_events) {
         if (e.event_type == "after" && e.has_changes) changed++;
+        if (e.event_type == "after" && !e.ir_before.empty()) snap_kept++;
+    }
     errs() << "  Passes with changes: " << changed << "\n";
+    if (g_snapshots && changed > 0 && snap_kept == 0) {
+        errs() << "  NOTE: --snapshots enabled but no IR snapshots were kept:\n"
+               << "        no allowlisted pass changed the IR (or every pair exceeded the "
+               << kMaxSnapshotBytes / (1024 * 1024) << " MiB cap)\n";
+    }
     errs() << "\n";
     errs() << "  Codegen (assembly):\n";
     errs() << "    Before: " << cg.asm_lines_before << " lines (" << cg.asm_size_before << " bytes)\n";
