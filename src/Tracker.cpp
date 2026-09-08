@@ -25,6 +25,19 @@ std::string classifyPass(StringRef name) {
         return "adaptor";
     if (name.find("Analysis") != StringRef::npos)
         return "analysis";
+    // Well-known analyses whose names carry no "Analysis" marker
+    // (e.g. LoopInfo, DominatorTree, MemorySSA would otherwise fall
+    // through to "transformation").
+    static const char *kAnalysisHints[] = {
+        "LoopInfo",      "Dominator",     "MemorySSA",     "ScalarEvolution",
+        "AssumptionCache", "TargetLibraryInfo", "DependenceInfo", "AAManager",
+        "CallGraph",     "ProfileSummary", "ShouldNotRunFunctionPasses",
+        nullptr,
+    };
+    for (int i = 0; kAnalysisHints[i]; i++) {
+        if (name.find(kAnalysisHints[i]) != StringRef::npos)
+            return "analysis";
+    }
     return "transformation";
 }
 

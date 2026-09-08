@@ -205,6 +205,24 @@ void test_classify_empty() {
           "classifyPass: empty -> transformation");
 }
 
+void test_classify_unmarked_analyses() {
+    CHECK(classifyPass("LoopInfo") == "analysis",
+          "classifyPass: LoopInfo -> analysis (no Analysis suffix)");
+    CHECK(classifyPass("DominatorTreeAnalysis") == "analysis",
+          "classifyPass: DominatorTreeAnalysis -> analysis");
+    CHECK(classifyPass("MemorySSA") == "analysis",
+          "classifyPass: MemorySSA -> analysis");
+    CHECK(classifyPass("ScalarEvolutionAnalysis") == "analysis",
+          "classifyPass: ScalarEvolutionAnalysis -> analysis");
+}
+
+void test_classify_transforms_unaffected() {
+    CHECK(classifyPass("StripNonLineTableDebInfo") == "transformation",
+          "classifyPass: StripNonLineTableDebInfo stays transformation");
+    CHECK(classifyPass("MemCpyOptPass") == "transformation",
+          "classifyPass: MemCpyOptPass stays transformation");
+}
+
 // ============================================================
 // irUnitKindName
 // ============================================================
@@ -541,6 +559,8 @@ int main() {
     test_classify_transform();
     test_classify_simplify();
     test_classify_empty();
+    test_classify_unmarked_analyses();
+    test_classify_transforms_unaffected();
 
     printf("\nirUnitKindName:\n");
     test_kind_names();
