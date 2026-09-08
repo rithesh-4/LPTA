@@ -634,7 +634,14 @@ function render(){
   document.getElementById('brand-meta').textContent=`${D.module_name} · -${D.pipeline}`;
   document.getElementById('nav-pass-count').textContent=changedCount(s);
   document.getElementById('sidebar-footer').textContent=`${s.total_events} events`;
-  renderOverview();renderFunctions();renderPasses();triggerReveals();
+  // Any single render path throwing (e.g. malformed foreign JSON that
+  // passed the shape check) must not leave a half-drawn dashboard.
+  try{
+    renderOverview();renderFunctions();renderPasses();triggerReveals();
+  }catch(err){
+    loadError('This history.json could not be rendered ('+esc(err.message||'unknown error')+'). Re-run <code>lpta_test</code> to regenerate it.');
+    return;
+  }
   aiInitSessions();
   // URL routing
   const h=location.hash.replace('#','');
