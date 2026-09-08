@@ -184,7 +184,7 @@ build/lpta_test.exe --compare demo_current/history.json demo_cross/history.json
 ```bash
 build/test_utilities.exe 2>&1 | tail -5
 ```
-> "75 unit tests pass. The tool is deterministic — same input produces byte-identical output. The test suite includes hand-verified ground truth, fuzz testing, and cross-validation against LLVM's own opt -stats."
+> "81 unit tests pass. The tool is deterministic — same input produces byte-identical output. The test suite includes hand-verified ground truth, fuzz testing, and cross-validation against LLVM's own opt -stats."
 
 **[9:40] Summary**
 > "LPTA gives compiler developers and performance engineers an explainable, evidence-backed view of LLVM's optimization pipeline: which passes ran, what they changed, how significant each change was, cross-target codegen impact, and regression detection between runs. It turns manual, multi-stage IR comparison into a repeatable workflow."
