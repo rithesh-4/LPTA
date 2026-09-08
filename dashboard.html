@@ -914,10 +914,12 @@ function selectFuncPass(idx){
   const funcName=currentFuncName||document.getElementById('func-modal-title').textContent.split('·')[0].trim();
   const passEvents=D.events.filter(e=>e.ir_kind==='Function'&&e.ir_name===funcName&&e.event_type==='after');
   const e=passEvents[idx];
-  if(!e||!e.ir_before){
-    const why=(e&&(e.has_changes||e.ir_changed))
-      ?'This pass changed the IR, but no snapshot was captured for it.\nSnapshots require: lpta_test input.ll report -O2 --snapshots\n(and only the 30 allowlisted passes are captured).'
-      :'No IR diff for this pass';
+  if(!e||!e.ir_before||!e.ir_after){
+    const why=(!e||(!e.ir_before&&!e.ir_after))
+      ?((e&&(e.has_changes||e.ir_changed))
+        ?'This pass changed the IR, but no snapshot was captured for it.\nSnapshots require: lpta_test input.ll report -O2 --snapshots\n(and only the 30 allowlisted passes are captured).'
+        :'No IR diff for this pass')
+      :'This event has only one side of the snapshot pair (old or foreign file).';
     document.getElementById('func-diff-area').innerHTML='<div style="padding:30px;text-align:center;color:var(--text-muted);white-space:pre-line">'+why+'</div>';return}
 
   const bL=e.ir_before.split('\n'),aL=e.ir_after.split('\n');
@@ -1109,7 +1111,17 @@ function renderChart(){
 // ===== IR DIFF MODAL =====
 function openDiff(eid){
   if(!eventMap)eventMap=new Map(D.events.map(e=>[e.id,e]));
-  const e=eventMap.get(eid);if(!e||!e.ir_before)return;
+  const e=eventMap.get(eid);
+  // One-sided snapshots (before without after or vice versa) come from
+  // hand-made or ancient files — show why instead of throwing on .split.
+  if(!e||!e.ir_before||!e.ir_after){
+    document.getElementById('modal-title').innerHTML='<span class="hl">IR diff unavailable</span>';
+    document.getElementById('ir-before').innerHTML='';
+    document.getElementById('ir-after').innerHTML='';
+    document.getElementById('modal-footer').innerHTML='<div style="padding:20px;color:var(--text-muted)">'+(e?'This event has only one side of the snapshot pair (old or foreign file). Re-run with <code>--snapshots</code> to regenerate.':'Unknown event.')+'</div>';
+    document.getElementById('modal-bg').classList.add('open');
+    return;
+  }
   CURRENT_DIFF_ID=eid;
   document.getElementById('modal-title').innerHTML=`<span class="hl">${esc(e.pass_name)}</span> · ${e.ir_kind} ${esc(e.ir_name)}`;
   const bL=e.ir_before.split('\n'),aL=e.ir_after.split('\n'),bS=new Set(bL),aS=new Set(aL);
