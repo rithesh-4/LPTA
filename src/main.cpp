@@ -1249,7 +1249,16 @@ int main(int argc, char **argv) {
             // Real IR change: hash differs. Catches mutations invisible to
             // counters (operand/constant/attribute edits). Both-zero means
             // unhashable (Unknown unit) — never report a change there.
-            uint64_t after_hash = hashIRUnit(IR);
+            // Serialize once: when snapshotting, hash the same text instead
+            // of serializing a second time.
+            std::string afterSnap;
+            uint64_t after_hash;
+            if (shouldSnapshot(PassID)) {
+                afterSnap = serializeIR(IR);
+                after_hash = hashIRText(afterSnap);
+            } else {
+                after_hash = hashIRUnit(IR);
+            }
             bool ir_changed = (after_hash != frame.before_hash);
             // Snapshots/diffs key off either signal: a pass that rewrote IR
             // without moving counters still deserves its before/after text.
@@ -1275,9 +1284,9 @@ int main(int argc, char **argv) {
             // dashboard never renders a one-sided diff. Also clean orphaned before file.
             bool both_fit = true;
             {
-                std::string afterSnap;
-                if (changed_any && shouldSnapshot(PassID))
-                    afterSnap = serializeIR(IR);
+                // afterSnap was captured above when snapshotting; drop it
+                // unless this pass actually changed something.
+                if (!changed_any) afterSnap.clear();
                 both_fit = !before_dropped &&
                            ev.ir_before.size() <= kMaxSnapshotBytes &&
                            afterSnap.size() <= kMaxSnapshotBytes;
