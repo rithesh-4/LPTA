@@ -233,7 +233,7 @@ bash tests/run_all_tests.sh build/
 # Fast correctness check (hand-verified tiny_proof.ll)
 bash tests/judge_proof.sh build/
 
-# Cross-validation against opt -stats + grep counting
+# Cross-validation against opt output + independent counting
 bash tests/validate_correctness.sh build/ test.ll
 
 # Unit tests only
@@ -474,7 +474,7 @@ This produces a side-by-side comparison of LPTA's metrics against manually verif
 
 ### 2. Independent IR Parsing
 
-`tests/validate_correctness.sh` uses `grep` to count IR elements independently (separate from LPTA's C++ counting code), then compares against LPTA's output:
+`tests/validate_correctness.sh` uses `tests/count_ir.py` to count IR elements independently (separate from LPTA's C++ counting code — opcode-anchored, wrap-aware), then compares against LPTA's output:
 
 ```bash
 bash tests/validate_correctness.sh build/ test.ll
@@ -482,11 +482,11 @@ bash tests/validate_correctness.sh build/ test.ll
 
 ### 3. LLVM Cross-Validation
 
-If `opt` is available, the validation script compares LPTA's metrics against LLVM's own `opt -stats` output — two independent counting implementations.
+If `opt` is available, the validation script compares LPTA's final metrics against `opt`'s own output — two independent optimization pipelines. It prefers `opt -stats`, falling back to counting instructions in `opt -O2 -S` output (some distributions ship `opt` with statistics disabled).
 
 ### 4. Determinism
 
-Running LPTA twice on the same input produces byte-identical `history.json` output.
+Running LPTA twice on the same input produces byte-identical `history.json` output — including across different output directories (run-specific absolute paths embedded by `llc` are normalized to filenames before measuring).
 
 ### 5. Formal Invariants
 
