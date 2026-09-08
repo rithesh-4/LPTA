@@ -68,7 +68,10 @@ Test Case       | LPTA Before | LPTA After | opt -O2 | Match?
 | 5 | 48 unit test assertions | PASS |
 | 6 | Initial metrics match input IR | PASS |
 
-*Codegen byte counts show ~4 byte variance between runs (likely llc path embedding in debug info), but all optimization metrics are deterministic.
+*Determinism is byte-identical across runs, including across different output
+directories: after llc succeeds, LPTA rewrites run-specific absolute paths
+embedded in debug directives (e.g. CodeView `# Object name`) to bare
+filenames before counting, so codegen byte counts no longer vary with paths.
 
 ## How to Reproduce
 

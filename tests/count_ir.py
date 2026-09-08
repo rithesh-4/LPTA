@@ -21,7 +21,63 @@ def count_file(path):
     in_func = False
     body = []
     label_re = re.compile(r"^\s*[a-zA-Z0-9_.]+:")
+    label_rest_re = re.compile(r"^\s*[a-zA-Z0-9_.]+:\s*(.+)$")
     op_re = re.compile(r"^\s*(?:%[^\s=]+\s*=\s*)?([A-Za-z][\w.]*)\b")
+    # Every opcode the LLVM text printer can emit at instruction start.
+    # A wrapped instruction's continuation lines (switch case lists, phi
+    # incoming lists, landingpad clauses) never start with one of these,
+    # so this set is what separates real instructions from continuations.
+    known_ops = frozenset(
+        "ret br switch indirectbr invoke callbr resume unreachable "
+        "cleanupret catchret catchswitch "
+        "add fadd sub fsub mul fmul udiv sdiv fdiv urem srem frem "
+        "shl lshr ashr and or xor fneg "
+        "alloca load store getelementptr fence atomicrmw cmpxchg "
+        "trunc zext sext fptoui fptosi uitofp sitofp fptrunc fpext "
+        "ptrtoint inttoptr bitcast addrspacecast "
+        "icmp fcmp phi call select va_arg "
+        "extractelement insertelement shufflevector extractvalue insertvalue "
+        "landingpad freeze cleanuppad catchpad tail musttail".split())
+    assign_re = re.compile(r"^\s*%[^\s=]+\s*=\s*")
+    opstart_re = re.compile(r"^\s*([A-Za-z][\w.]*)\b")
+
+    def logical_lines(lines):
+        """Join printer-wrapped instructions into logical lines.
+
+        LLVM wraps long instructions (switch case lists, phi incoming
+        lists, landingpad clauses) across physical lines. Counting physical
+        lines overcounts vs the API counter, so continuation lines are
+        folded into the instruction they belong to.
+        """
+        out = []
+        cur = ""
+        for line in lines:
+            s = line.strip()
+            if not s or s.startswith(";") or s in ("{", "}"):
+                continue
+            if label_re.match(line):
+                if cur:
+                    out.append(cur)
+                    cur = ""
+                out.append(line)
+                continue
+            code = line.split(";", 1)[0]
+            if not code.strip():
+                continue
+            if assign_re.match(code):
+                starts_new = True
+            else:
+                om = opstart_re.match(code)
+                starts_new = bool(om and om.group(1) in known_ops)
+            if starts_new:
+                if cur:
+                    out.append(cur)
+                cur = code.strip()
+            else:
+                cur += (" " + code.strip()) if cur else code.strip()
+        if cur:
+            out.append(cur)
+        return out
 
     def flush():
         nonlocal bbs, instrs, calls, loads, stores, branches, phis, rets, body
@@ -30,9 +86,17 @@ def count_file(path):
         bbs += len([line for line in body if label_re.match(line)])
         if not label_re.match(body[0]):
             bbs += 1  # anonymous entry block has no label
-        for line in body:
-            code = line.split(";", 1)[0]
-            if not code.strip() or label_re.match(line):
+        for line in logical_lines(body):
+            if label_re.match(line):
+                # Label sharing its line with an instruction (rare) still
+                # carries one instruction after the colon.
+                m2 = label_rest_re.match(line.split(";", 1)[0])
+                if not m2:
+                    continue
+                code = m2.group(1)
+            else:
+                code = line.split(";", 1)[0]
+            if not code.strip():
                 continue
             m = op_re.match(code)
             if not m:

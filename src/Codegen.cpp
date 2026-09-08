@@ -170,7 +170,6 @@ static std::string shellQuoteBare(const std::string &s) {
 // ============================================================
 // Assembly Counting Helper
 // ============================================================
-
 static void countAssembly(const std::string &asm_path,
                           unsigned &lines, unsigned &bytes) {
     std::error_code ec;
@@ -187,6 +186,61 @@ static void countAssembly(const std::string &asm_path,
     auto sz = fs::file_size(asm_path, ec2);
     if (!ec2)
         bytes = static_cast<unsigned>(sz);
+}
+
+// Rewrite run-specific absolute paths embedded by llc (e.g. CodeView
+// `.asciz "<abs-output>" # Object name`) to bare filenames. Without this,
+// history.json codegen byte counts differ between runs that only change the
+// output directory, breaking the byte-identical determinism invariant.
+// The files stay valid assembly; only embedded host paths are shortened.
+static void normalizeAsmPaths(const std::string &asm_path,
+                              const std::string &abs_output,
+                              const std::string &abs_input) {
+    std::ifstream f(asm_path, std::ios::binary);
+    if (!f) return;
+    std::string content((std::istreambuf_iterator<char>(f)),
+                        std::istreambuf_iterator<char>());
+    f.close();
+    auto replace_all = [](std::string &hay, const std::string &needle,
+                          const std::string &rep) {
+        if (needle.empty() || needle == rep) return;
+        size_t p = 0;
+        while ((p = hay.find(needle, p)) != std::string::npos) {
+            hay.replace(p, needle.size(), rep);
+            p += rep.size();
+        }
+    };
+    auto escape_bs = [](const std::string &s) {
+        std::string r;
+        r.reserve(s.size());
+        for (char c : s) {
+            if (c == '\\') r += "\\\\";
+            else r += c;
+        }
+        return r;
+    };
+    auto slashify = [](const std::string &s) {
+        std::string r = s;
+        for (char &c : r)
+            if (c == '\\') c = '/';
+        return r;
+    };
+    std::string out_base = fs::path(abs_output).filename().string();
+    std::string in_base = fs::path(abs_input).filename().string();
+    // Raw, backslash-escaped (llc debug directives), and forward-slash forms.
+    replace_all(content, escape_bs(abs_output), out_base);
+    replace_all(content, slashify(abs_output), out_base);
+    replace_all(content, abs_output, out_base);
+    replace_all(content, escape_bs(abs_input), in_base);
+    replace_all(content, slashify(abs_input), in_base);
+    replace_all(content, abs_input, in_base);
+    std::ofstream o(asm_path, std::ios::binary | std::ios::trunc);
+    if (!o) {
+        errs() << "  WARNING: could not normalize paths in '" << asm_path
+               << "' (codegen counts may vary between runs)\n";
+        return;
+    }
+    o << content;
 }
 
 // ============================================================
@@ -276,6 +330,7 @@ int runLlc(const std::string &llc, const std::string &input,
     int rc = system(("call \"" + bat + "\"").c_str());
     std::error_code ec_rm;
     fs::remove(bat, ec_rm);
+    if (rc == 0) normalizeAsmPaths(abs_output, abs_output, abs_input);
     return rc;
 #else
     // POSIX: use single-quote wrapping with embedded-quote escaping to prevent
@@ -284,7 +339,9 @@ int runLlc(const std::string &llc, const std::string &input,
     if (!triple.empty()) cmd_args += " -mtriple=" + shellQuoteBare(triple);
     cmd_args += " -o " + shellQuoteBare(abs_output) + " " + shellQuoteBare(abs_input);
     std::string cmd = shellQuoteBare(abs_llc) + " " + cmd_args;
-    return system(cmd.c_str());
+    int rc = system(cmd.c_str());
+    if (rc == 0) normalizeAsmPaths(abs_output, abs_output, abs_input);
+    return rc;
 #endif
 }
 

@@ -13,6 +13,17 @@ DEMO_LL="$DEMO_DIR/demo.ll"
 DEMO_C="$DEMO_DIR/demo.c"
 OUT="$DEMO_DIR/demo_output"
 
+# Python interpreter (python3 preferred)
+PYTHON=""
+if command -v python3 &>/dev/null; then
+    PYTHON="python3"
+elif command -v python &>/dev/null; then
+    PYTHON="python"
+else
+    echo "ERROR: python3/python not found"
+    exit 1
+fi
+
 # Find opt
 OPT=""
 for p in \
@@ -47,7 +58,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 echo "  Source: $DEMO_C"
 echo "  Functions: $(grep -c '^define' $DEMO_LL)"
-echo "  optnone:   $(grep -c 'optnone' $DEMO_LL) functions marked 'do not optimize'"
+echo "  optnone:   $(grep -c 'optnone' $DEMO_LL || true) functions marked 'do not optimize'"
 echo "  Total lines: $(wc -l < $DEMO_LL)"
 echo ""
 echo "  Note: Every function has 'optnone' — LLVM normally SKIPS optimization."
@@ -59,7 +70,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  STEP 2: Run LPTA (-O2 pipeline)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-"$LPTA" "$DEMO_LL" "$OUT" -O2 2>&1 | grep -E "(Optnone|Stripping|Handling|Summary|Pass executions|Total recorded|Stack remaining|Passes with changes|Assembly|Before:|After:|Reduction)"
+"$LPTA" "$DEMO_LL" "$OUT" -O2 2>&1 | grep -E "(Optnone|Stripping|Handling|Summary|Pass executions|Total recorded|Stack remaining|Passes with changes|Assembly|Before:|After:|Reduction)" || true
 echo ""
 
 # ---- Step 3: Show per-function results ----
@@ -67,7 +78,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  STEP 3: Per-Function Optimization Impact"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-python -c "
+$PYTHON -c "
 import json
 with open('$OUT/history.json') as f:
     data = json.load(f)
@@ -103,27 +114,94 @@ echo ""
 
 # ---- Step 4: Cross-validate against opt ----
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  STEP 4: Cross-Validate Against LLVM opt -O2"
+echo "  STEP 4: Cross-Validate Against LLVM opt -O2 (computed live)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "  Cross-validation performed on 8 diverse C edge cases:"
-echo "  (dead code, loops, inlining, bitops, switch, memory,"
-echo "   phi nodes, globals — see tests/edge_cases/VERIFICATION_REPORT.md)"
+echo "  Each edge-case IR is stripped of optnone (LPTA strips it internally;"
+echo "  opt respects it, so both must see the same input), then optimized"
+echo "  independently by LPTA and by opt -O2. Final instruction counts must"
+echo "  match exactly."
 echo ""
-echo '  Test case     | LPTA | opt  | Match'
-echo '  --------------+------+------+------'
-echo '  dead_code     |   20 |   20 |  YES'
-echo '  loops         |  129 |  129 |  YES'
-echo '  inline        |  115 |  115 |  YES'
-echo '  bitops        |  157 |  157 |  YES'
-echo '  switch        |  116 |  116 |  YES'
-echo '  memory        |  381 |  381 |  YES'
-echo '  phi_nodes     |  226 |  226 |  YES'
-echo '  globals       |   49 |   49 |  YES'
-echo '  --------------+------+------+------'
-echo '  8/8 EXACT MATCH'
-echo ""
-echo "  [VERIFIED] LPTA numbers match LLVM opt -O2 on all test cases"
+
+# Locate opt (Windows distros ship opt.exe)
+if [ -z "$OPT" ] || [ ! -f "$OPT" ]; then
+    OPT=""
+    for p in \
+        "${LLVM_DIR:-}/bin/opt.exe" \
+        "${LLVM_DIR:-}/bin/opt" \
+        "C:/LLVM-full/clang+llvm-22.1.8-x86_64-pc-windows-msvc/bin/opt.exe" \
+        "/mnt/c/LLVM-full/clang+llvm-22.1.8-x86_64-pc-windows-msvc/bin/opt.exe" \
+        "/usr/bin/opt" \
+        "$(which opt 2>/dev/null || true)" \
+        "$(which opt.exe 2>/dev/null || true)"; do
+        [ -n "$p" ] && [ -f "$p" ] && OPT="$p" && break
+    done
+fi
+
+# Locate the shared IR counter
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+COUNT_IR="$SCRIPT_DIR/../count_ir.py"
+if [ ! -f "$COUNT_IR" ]; then
+    COUNT_IR="tests/count_ir.py"
+fi
+HAVE_PY=0
+command -v $PYTHON &>/dev/null && HAVE_PY=1
+
+printf '  %-12s | %6s | %6s | %s\n' "Test case" "LPTA" "opt" "Match"
+echo '  -------------+--------+--------+------'
+DEMO_PASS=0
+DEMO_FAIL=0
+DEMO_TMP="$OUT/xval_tmp"
+mkdir -p "$DEMO_TMP"
+if [ -z "$OPT" ] || [ $HAVE_PY -eq 0 ]; then
+    echo "  [SKIP] opt or $PYTHON not found — cannot cross-validate"
+    echo "         (set LLVM_DIR so opt.exe is found)"
+else
+    for ll in "$DEMO_DIR"/../edge_cases/ir/0*.ll "$DEMO_DIR"/../edge_cases/ir/1*.ll; do
+        [ -f "$ll" ] || continue
+        tname="$(basename "$ll" .ll)"
+        # Strip optnone so both optimizers see identical input
+        sed 's/ optnone//g' "$ll" > "$DEMO_TMP/input.ll"
+        "$LPTA" "$DEMO_TMP/input.ll" "$DEMO_TMP/lpta_out" -O2 >/dev/null 2>&1
+        if [ $? -ne 0 ]; then
+            printf '  %-12s | %6s | %6s | %s\n' "$tname" "ERR" "-" "LPTA FAILED"
+            DEMO_FAIL=$((DEMO_FAIL + 1))
+            continue
+        fi
+        LPTA_FINAL=$($PYTHON -c "
+import json
+d = json.load(open('$DEMO_TMP/lpta_out/history.json'))
+last = None
+for e in d['events']:
+    if e['event_type'] == 'after' and e.get('ir_kind') == 'Module':
+        last = e
+print(last['metrics_after']['instruction_count'] if last else -1)
+" 2>/dev/null)
+        "$OPT" -O2 -S "$DEMO_TMP/input.ll" -o "$DEMO_TMP/opt.ll" >/dev/null 2>&1
+        if [ $? -ne 0 ]; then
+            printf '  %-12s | %6s | %6s | %s\n' "$tname" "$LPTA_FINAL" "ERR" "OPT FAILED"
+            DEMO_FAIL=$((DEMO_FAIL + 1))
+            continue
+        fi
+        OPT_FINAL=$($PYTHON "$COUNT_IR" "$DEMO_TMP/opt.ll" 2>/dev/null | grep "^GT_INSTRUCTIONS=" | cut -d= -f2)
+        if [ "$LPTA_FINAL" = "$OPT_FINAL" ]; then
+            printf '  %-12s | %6s | %6s | %s\n' "$tname" "$LPTA_FINAL" "$OPT_FINAL" "YES"
+            DEMO_PASS=$((DEMO_PASS + 1))
+        else
+            printf '  %-12s | %6s | %6s | %s\n' "$tname" "$LPTA_FINAL" "$OPT_FINAL" "NO"
+            DEMO_FAIL=$((DEMO_FAIL + 1))
+        fi
+        rm -rf "$DEMO_TMP/lpta_out" "$DEMO_TMP/input.ll" "$DEMO_TMP/opt.ll"
+    done
+    echo '  -------------+--------+--------+------'
+    echo "  $DEMO_PASS/$((DEMO_PASS + DEMO_FAIL)) EXACT MATCH"
+    echo ""
+    if [ $DEMO_FAIL -eq 0 ]; then
+        echo "  [VERIFIED] LPTA numbers match LLVM opt -O2 on all test cases"
+    else
+        echo "  [FAIL] $DEMO_FAIL case(s) differ — investigate before presenting"
+    fi
+fi
 echo ""
 
 # ---- Step 5: Determinism check ----
@@ -133,27 +211,12 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 OUT2="$OUT/determinism"
 "$LPTA" "$DEMO_LL" "$OUT2" -O2 2>&1 > /dev/null
-python -c "
-import json
-with open('$OUT/history.json') as f:
-    d1 = json.load(f)['summary']
-with open('$OUT2/history.json') as f:
-    d2 = json.load(f)['summary']
-keys = ['total_instructions_before', 'total_instructions_after', 'total_bbs_before', 'total_bbs_after', 'passes_with_changes', 'total_events']
-all_match = True
-for k in keys:
-    v1, v2 = d1.get(k), d2.get(k)
-    eq = v1 == v2
-    mark = '  MATCH' if eq else '  DIFFER'
-    print(f'  {k:<40s} {str(v1):>8s} vs {str(v2):<8s}{mark}')
-    if not eq: all_match = False
-if all_match:
-    print()
-    print('  [OK] Deterministic - identical results across runs')
-else:
-    print()
-    print('  [WARN] Non-deterministic output detected')
-"
+if diff -q "$OUT/history.json" "$OUT2/history.json" >/dev/null 2>&1; then
+    echo "  [OK] Deterministic - byte-identical history.json across runs"
+else
+    echo "  [WARN] Non-deterministic output detected"
+    DEMO_FAIL=$((DEMO_FAIL + 1))
+fi
 echo ""
 
 # ---- Summary ----
@@ -162,13 +225,26 @@ echo "  VERDICT"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "  LPTA correctly reports:"
-echo "    * Which passes ran (973 pass executions tracked)"
-echo "    * What changed per pass (83 passes with measurable impact)"
-echo "    * How significant each change was (10-metric deltas)"
+SUMMARY_LINE=$($PYTHON -c "
+import json
+d = json.load(open('$OUT/history.json'))
+s = d['summary']
+print(str(s['total_before']) + '|' + str(s['passes_with_changes']))
+" 2>/dev/null || echo "|")
+echo "    * Which passes ran (${SUMMARY_LINE%%|*} pass executions tracked)"
+echo "    * What changed per pass (${SUMMARY_LINE##*|} passes with measurable impact)"
+echo "    * How significant each change was (counter + opcode-group + IR-hash deltas)"
 echo "    * How it affected final codegen (assembly measurement)"
-echo "    * Numbers match LLVM opt -O2 (cross-validated)"
-echo "    * Deterministic (identical across runs)"
+if [ $DEMO_FAIL -eq 0 ]; then
+    echo "    * Numbers match LLVM opt -O2 (cross-validated)"
+    echo "    * Deterministic (identical across runs)"
+else
+    echo "    * $DEMO_FAIL check(s) FAILED — see above, do not present as green"
+fi
 echo ""
 echo "  Full data: $OUT/history.json ($(wc -c < "$OUT/history.json") bytes)"
 echo "  Open dashboard.html to visualize the results interactively"
+echo ""
+
+exit $DEMO_FAIL
 echo ""
