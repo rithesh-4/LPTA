@@ -606,6 +606,10 @@ async function load(){
     // events array and a summary object.
     if(!D||!Array.isArray(D.events)||typeof D.summary!=='object'||!D.summary)
       throw new Error('bad-shape');
+    // Normalize optional top-level fields so foreign-but-valid JSON can't
+    // render "undefined" across the header/cards.
+    if(typeof D.module_name!=='string'||!D.module_name)D.module_name='(unknown module)';
+    if(typeof D.pipeline!=='string'||!D.pipeline)D.pipeline='?';
     eventMap=null;render();
   }
   catch(e){
@@ -1358,6 +1362,9 @@ INTERACTING PASSES: Optimization is iterative. Explain interactions as opportuni
 
 function aiTrim(s,cap){
   if(!s)return '(IR snapshot not captured for this pass — reason from metrics only)';
+  // Default cap: IR snapshots reach 4 MiB each — never send megabytes to the
+  // model. Callers pass no cap; the default must always apply.
+  cap=(typeof cap==='number'&&cap>0)?cap:12000;
   return s.length>cap?s.slice(0,cap)+'\n… ['+(s.length-cap)+' more chars truncated]':s;
 }
 
