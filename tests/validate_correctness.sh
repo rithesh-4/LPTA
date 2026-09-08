@@ -29,6 +29,19 @@ pass() { PASS=$((PASS + 1)); TOTAL=$((TOTAL + 1)); echo "  [PASS] $1" | tee -a "
 fail() { FAIL=$((FAIL + 1)); TOTAL=$((TOTAL + 1)); echo "  [FAIL] $1" | tee -a "$REPORT"; }
 info() { echo "  [INFO] $1" | tee -a "$REPORT"; }
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Determine python command (needed by Source 1 already)
+PYTHON=""
+if command -v python3 &>/dev/null; then
+    PYTHON="python3"
+elif command -v python &>/dev/null; then
+    PYTHON="python"
+else
+    echo "  [FAIL] python3/python not found — cannot parse JSON" | tee "$REPORT"
+    exit 1
+fi
+
 echo "=== LPTA Correctness Validation ===" | tee "$REPORT"
 echo "Date: $(date)" | tee -a "$REPORT"
 echo "Test file: $TEST_FILE" | tee -a "$REPORT"
@@ -39,74 +52,13 @@ echo "" | tee -a "$REPORT"
 # ============================================================
 echo "Source 1: Independent IR Element Counting" | tee -a "$REPORT"
 
-GT_COUNTS=$(python3 -c "
-import re, sys
-with open('$TEST_FILE') as f:
-    lines = f.readlines()
-
-funcs = bbs = instrs = calls = loads = stores = branches = phis = rets = globals_ct = 0
-in_func = False
-body = []
-label_re = re.compile(r'^\s*[a-zA-Z0-9_.]+:')
-op_re = re.compile(r'^\s*(?:%[^\s=]+\s*=\s*)?([A-Za-z][\w.]*)\b')
-
-def flush():
-    global bbs, instrs, calls, loads, stores, branches, phis, rets, body
-    if not body:
-        return
-    bbs += len([l for l in body if label_re.match(l)])
-    if not label_re.match(body[0]):
-        bbs += 1  # anonymous entry block has no label
-    for l in body:
-        code = l.split(';', 1)[0]
-        if not code.strip() or label_re.match(l):
-            continue
-        m = op_re.match(code)
-        if not m:
-            continue
-        instrs += 1
-        op = m.group(1)
-        if op in ('call', 'invoke', 'callbr', 'tail', 'musttail'):
-            calls += 1
-        elif op == 'load':
-            loads += 1
-        elif op == 'store':
-            stores += 1
-        elif op in ('br', 'switch', 'indirectbr'):
-            branches += 1
-        elif op == 'phi':
-            phis += 1
-        elif op == 'ret':
-            rets += 1
-    body = []
-
-for line in lines:
-    sline = line.strip()
-    if line.startswith('define '):
-        in_func = True
-        funcs += 1
-        body = []
-    elif line.startswith('}'):
-        flush()
-        in_func = False
-    elif line.startswith('@') and '=' in line:
-        globals_ct += 1
-    elif in_func:
-        if sline == '' or sline.startswith(';'):
-            continue
-        body.append(line)
-
-print(f'GT_FUNCTIONS={funcs}')
-print(f'GT_BBS={bbs}')
-print(f'GT_INSTRUCTIONS={instrs}')
-print(f'GT_CALLS={calls}')
-print(f'GT_LOADS={loads}')
-print(f'GT_STORES={stores}')
-print(f'GT_BRANCHES={branches}')
-print(f'GT_PHIS={phis}')
-print(f'GT_RETURNS={rets}')
-print(f'GT_GLOBALS={globals_ct}')
-")
+GT_COUNTS=$($PYTHON "$SCRIPT_DIR/count_ir.py" "$TEST_FILE")
+if [ -z "$GT_COUNTS" ]; then
+    fail "Independent counter produced no output for $TEST_FILE"
+    echo "" | tee -a "$REPORT"
+    echo "=== Summary: $PASS passed, $FAIL failed ===" | tee -a "$REPORT"
+    exit 1
+fi
 
 eval "$GT_COUNTS"
 
@@ -149,18 +101,7 @@ fi
 
 # Extract the FIRST "before" event's metrics (this is the initial IR state)
 # This represents the raw input IR before any optimization
-# Use python for reliable JSON parsing
-# Try python3, fall back to python
-PYTHON=""
-if command -v python3 &>/dev/null; then
-    PYTHON="python3"
-elif command -v python &>/dev/null; then
-    PYTHON="python"
-else
-    fail "python3/python not found — cannot parse JSON"
-    exit 1
-fi
-
+# (PYTHON was detected at the top of this script)
 LPTA_DATA=$($PYTHON -c "
 import json, sys
 with open('$OUT_DIR/history.json') as f:
@@ -253,14 +194,22 @@ echo "" | tee -a "$REPORT"
 # ============================================================
 echo "Source 3: LLVM opt -stats Cross-Validation" | tee -a "$REPORT"
 
-# Find opt
+# Find opt (also try opt.exe: Windows distributions ship suffixed binaries
+# that `command -v opt` and bare-path probes miss)
 OPT=""
 if command -v opt &>/dev/null; then
     OPT="opt"
-elif [ -n "${LLVM_DIR:-}" ] && [ -x "${LLVM_DIR:-}/bin/opt" ]; then
-    OPT="${LLVM_DIR:-}/bin/opt"
-elif [ -n "${LLVM_INSTALL_DIR:-}" ] && [ -x "${LLVM_INSTALL_DIR:-}/bin/opt" ]; then
-    OPT="${LLVM_INSTALL_DIR:-}/bin/opt"
+elif command -v opt.exe &>/dev/null; then
+    OPT="opt.exe"
+else
+    for _dir in "${LLVM_DIR:-}" "${LLVM_INSTALL_DIR:-}"; do
+        for _exe in opt opt.exe; do
+            if [ -n "$_dir" ] && [ -x "$_dir/bin/$_exe" ]; then
+                OPT="$_dir/bin/$_exe"
+                break 2
+            fi
+        done
+    done
 fi
 
 if [ -n "$OPT" ]; then
@@ -302,7 +251,32 @@ else:
             fi
         fi
     else
-        info "Could not parse opt instruction count from stats"
+        info "opt -stats produced no parsable count (stats may be disabled in this build)"
+        info "Falling back to output-based check: count instructions in opt -O2 -S output"
+        OPT_OUT_LL="$OUT_DIR/opt_O2.ll"
+        if "$OPT" -O2 -S "$TEST_FILE" -o "$OPT_OUT_LL" >/dev/null 2>&1 && [ -f "$OPT_OUT_LL" ]; then
+            OPT_OUT_COUNTS=$($PYTHON "$SCRIPT_DIR/count_ir.py" "$OPT_OUT_LL" 2>/dev/null)
+            OPT_OUT_INSTR=$(echo "$OPT_OUT_COUNTS" | grep "^GT_INSTRUCTIONS=" | cut -d= -f2)
+            if [ -n "$OPT_OUT_INSTR" ]; then
+                if [ -z "${LPTA_FINAL_INSTR:-}" ]; then
+                    LPTA_FINAL_INSTR=$($PYTHON -c "
+import json
+with open('$OUT_DIR/history.json') as f:
+    d = json.load(f)
+last_after = None
+for e in d['events']:
+    if e['event_type'] == 'after' and e.get('ir_kind') == 'Module':
+        last_after = e
+print(last_after['metrics_after']['instruction_count'] if last_after else 0)
+" 2>/dev/null)
+                fi
+                compare "opt -O2 output vs LPTA final instructions" "$LPTA_FINAL_INSTR" "$OPT_OUT_INSTR"
+            else
+                info "Could not count instructions in opt output"
+            fi
+        else
+            info "opt -O2 -S run failed — skipping output-based check"
+        fi
     fi
     
     # Also check that opt -O0 produces same count as LPTA's initial state
