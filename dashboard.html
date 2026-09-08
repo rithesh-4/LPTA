@@ -1668,20 +1668,28 @@ let COMPARE_RESULT = null;
 let COMPARE_SORT = 'instr_delta_delta';
 let COMPARE_SORT_DIR = -1;
 
-function loadBaseFile(e){
+function loadCompareFile(e,which){
   const f=e.target.files[0];
   if(!f)return;
+  const nameEl=document.getElementById(which==='base'?'base-file-name':'curr-file-name');
   const r=new FileReader();
-  r.onload=()=>{COMPARE_BASE=JSON.parse(r.result);document.getElementById('base-file-name').textContent=f.name;updateCompareBtn()};
+  // Invalid JSON must surface as a visible error, not an uncaught exception.
+  r.onload=()=>{
+    try{
+      const parsed=JSON.parse(r.result);
+      if(!parsed||!Array.isArray(parsed.events)){throw new Error('not an LPTA history file (missing events array)')}
+      if(which==='base')COMPARE_BASE=parsed;else COMPARE_CURR=parsed;
+      nameEl.textContent=f.name;nameEl.style.color='';
+    }catch(err){
+      if(which==='base')COMPARE_BASE=null;else COMPARE_CURR=null;
+      nameEl.textContent=f.name+' — invalid JSON ('+err.message+')';nameEl.style.color='var(--red)';
+    }
+    updateCompareBtn();
+  };
   r.readAsText(f);
 }
-function loadCurrFile(e){
-  const f=e.target.files[0];
-  if(!f)return;
-  const r=new FileReader();
-  r.onload=()=>{COMPARE_CURR=JSON.parse(r.result);document.getElementById('curr-file-name').textContent=f.name;updateCompareBtn()};
-  r.readAsText(f);
-}
+function loadBaseFile(e){loadCompareFile(e,'base')}
+function loadCurrFile(e){loadCompareFile(e,'curr')}
 function updateCompareBtn(){
   const btn=document.getElementById('compare-btn');
   if(COMPARE_BASE&&COMPARE_CURR)btn.disabled=false;
