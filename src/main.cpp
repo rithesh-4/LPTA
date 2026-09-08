@@ -1056,6 +1056,39 @@ int main(int argc, char **argv) {
         }
     }
 
+    // Remove stale per-run artifacts from previous runs reusing this
+    // directory: per-pass snapshots (ir/), codegen assembly, and temp llc
+    // scripts. Without this, a run with fewer snapshots/targets leaves
+    // orphans behind that look like current output. history.json and the
+    // before/after IR are overwritten below, so they need no cleanup.
+    {
+        auto ends_with = [](const std::string &s, const char *suf) {
+            std::string su(suf);
+            return s.size() >= su.size() &&
+                   s.compare(s.size() - su.size(), su.size(), su) == 0;
+        };
+        std::error_code ec_iter;
+        for (auto &entry : fs::directory_iterator(g_output_dir, ec_iter)) {
+            if (ec_iter) break;
+            std::error_code ec_e;
+            if (entry.is_directory(ec_e)) {
+                if (entry.path().filename() == "ir") {
+                    std::error_code ec_rm;
+                    fs::remove_all(entry.path(), ec_rm);
+                }
+            } else {
+                std::string fn = entry.path().filename().string();
+                bool is_codegen = fn.rfind("codegen_", 0) == 0 && ends_with(fn, ".s");
+                bool is_bat = ends_with(fn, ".run_llc.bat") ||
+                              (fn.rfind("run_llc_", 0) == 0 && ends_with(fn, ".bat"));
+                if (is_codegen || is_bat) {
+                    std::error_code ec_rm;
+                    fs::remove(entry.path(), ec_rm);
+                }
+            }
+        }
+    }
+
     // ============================================================
     // Detect optnone functions
     // ============================================================
