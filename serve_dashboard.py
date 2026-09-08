@@ -48,6 +48,10 @@ def _is_valid_nvidia_key(key):
 DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 CONFIG_FILENAME = ".lpta_config.json"
 
+# Largest accepted POST body (histories with IR snapshots reach low tens of
+# MB; anything bigger is abuse or a client bug — refuse before buffering).
+MAX_BODY_BYTES = 64 * 1024 * 1024
+
 
 def load_config():
     """Load config from .lpta_config.json (current dir or home dir)."""
@@ -485,9 +489,11 @@ class LPTAHandler(SimpleHTTPRequestHandler):
                 ),
             })
 
+        raw, length = self._read_body()
+        if raw is None:
+            return self._send_json(413, {"error": f"request body too large (limit {MAX_BODY_BYTES} bytes)"})
         try:
-            length = int(self.headers.get("Content-Length", 0))
-            payload = json.loads(self.rfile.read(length) or b"{}")
+            payload = json.loads(raw or b"{}")
         except (ValueError, json.JSONDecodeError):
             return self._send_json(400, {"error": "invalid JSON body"})
 
@@ -528,6 +534,27 @@ class LPTAHandler(SimpleHTTPRequestHandler):
         except OSError as e:  # read timeouts (socket.timeout) and dropped connections
             return self._send_json(502, {"error": f"upstream I/O failure: {e}"})
 
+    def _read_body(self):
+        """Read the POST body, enforcing MAX_BODY_BYTES. Returns bytes or
+        None (caller sends 413) and raw length for diagnostics. Oversized
+        bodies are drained in small chunks (bounded RAM) so the client gets
+        a clean 413 instead of a connection reset."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            return None, 0
+        if length < 0:
+            return None, length
+        if length > MAX_BODY_BYTES:
+            remaining = length
+            while remaining > 0:
+                chunk = self.rfile.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+            return None, length
+        return self.rfile.read(length), length
+
     def _send_json(self, code, obj):
         data = json.dumps(obj).encode("utf-8")
         self.send_response(code)
@@ -542,9 +569,11 @@ class LPTAHandler(SimpleHTTPRequestHandler):
         self.wfile.write(data)
 
     def _handle_compare(self):
+        raw, length = self._read_body()
+        if raw is None:
+            return self._send_json(413, {"error": f"request body too large (limit {MAX_BODY_BYTES} bytes)"})
         try:
-            length = int(self.headers.get("Content-Length", 0))
-            payload = json.loads(self.rfile.read(length) or b"{}")
+            payload = json.loads(raw or b"{}")
         except (ValueError, json.JSONDecodeError):
             return self._send_json(400, {"error": "invalid JSON body"})
 

@@ -954,6 +954,13 @@ int main(int argc, char **argv) {
                 errs() << "ERROR: --targets produced no valid targets\n";
                 return 1;
             }
+            // Each target costs 2 llc spawns; warn before a typo'd list
+            // burns minutes (e.g. 500 targets = 1000 llc invocations).
+            if (g_target_triples.size() > 16) {
+                errs() << "  WARNING: " << g_target_triples.size()
+                       << " codegen targets requested — each runs llc twice; "
+                       << "expect a slow run\n";
+            }
         } else if (!end_of_flags && (arg == "-O0" || arg == "--O0")) {
             g_opt = OptimizationLevel::O0; g_opt_level = "O0";
         } else if (!end_of_flags && (arg == "-O1" || arg == "--O1")) {
