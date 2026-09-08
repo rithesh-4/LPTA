@@ -333,6 +333,7 @@ before_count = sum(1 for e in events if e['event_type'] == 'before')
 after_count = sum(1 for e in events if e['event_type'] == 'after')
 invalidated_count = sum(1 for e in events if e['event_type'] == 'invalidated')
 changed_count = sum(1 for e in events if e['event_type'] == 'after' and e.get('has_changes'))
+ir_changed_count = sum(1 for e in events if e['event_type'] == 'after' and (e.get('has_changes') or e.get('ir_changed')))
 
 s = d['summary']
 if s['total_before'] != before_count:
@@ -342,7 +343,9 @@ if s['total_after'] != after_count:
 if s['total_invalidated'] != invalidated_count:
     errors.append(f'summary.total_invalidated={s[\"total_invalidated\"]} != actual {invalidated_count}')
 if s['passes_with_changes'] != changed_count:
-    errors.append(f'summary.passes_with_changes={s[\"passes_with_changes\"]} != actual {changed_count}')
+    errors.append(f'summary.passes_with_changes={s["passes_with_changes"]} != actual {changed_count}')
+if 'passes_with_ir_changes' in s and s['passes_with_ir_changes'] != ir_changed_count:
+    errors.append(f'summary.passes_with_ir_changes={s["passes_with_ir_changes"]} != actual {ir_changed_count}')
 if s['total_events'] != len(events):
     errors.append(f'summary.total_events={s[\"total_events\"]} != actual {len(events)}')
 

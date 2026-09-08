@@ -75,13 +75,15 @@ bool writeHistoryJSON(const std::string &filename, const CodegenResult &cg) {
 
     // Summary stats
     unsigned before_count = 0, after_count = 0, invalidated_count = 0;
-    unsigned passes_with_changes = 0;
+    unsigned passes_with_changes = 0, passes_with_ir_changes = 0;
     std::set<std::string> unique_passes;
     for (auto &e : g_events) {
         if (e.event_type == "before") before_count++;
         else if (e.event_type == "after") after_count++;
         else invalidated_count++;
         if (e.event_type == "after" && e.has_changes) passes_with_changes++;
+        if (e.event_type == "after" && (e.has_changes || e.ir_changed))
+            passes_with_ir_changes++;
         unique_passes.insert(e.pass_name);
     }
 
@@ -141,6 +143,7 @@ bool writeHistoryJSON(const std::string &filename, const CodegenResult &cg) {
     f << "    \"total_after\": " << after_count << ",\n";
     f << "    \"total_invalidated\": " << invalidated_count << ",\n";
     f << "    \"passes_with_changes\": " << passes_with_changes << ",\n";
+    f << "    \"passes_with_ir_changes\": " << passes_with_ir_changes << ",\n";
     f << "    \"unique_pass_names\": " << unique_passes.size() << ",\n";
     // Pipeline summary: total instruction reduction. Keys are ALWAYS emitted
     // (zeros when unavailable) so the schema is stable even for runs that

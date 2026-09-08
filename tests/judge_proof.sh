@@ -268,12 +268,14 @@ before_ct = sum(1 for e in events if e['event_type'] == 'before')
 after_ct = sum(1 for e in events if e['event_type'] == 'after')
 inv_ct = sum(1 for e in events if e['event_type'] == 'invalidated')
 changed_ct = sum(1 for e in events if e['event_type'] == 'after' and e.get('has_changes'))
+ir_ct = sum(1 for e in events if e['event_type'] == 'after' and (e.get('has_changes') or e.get('ir_changed')))
 
 checks.append(('Summary totals match event counts',
     s['total_before'] == before_ct and
     s['total_after'] == after_ct and
     s['total_invalidated'] == inv_ct and
-    s['passes_with_changes'] == changed_ct))
+    s['passes_with_changes'] == changed_ct and
+    s.get('passes_with_ir_changes', ir_ct) == ir_ct))
 
 # Check 2: every after has both metric sets
 checks.append(('All after-events have metrics_before and metrics_after',

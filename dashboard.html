@@ -625,7 +625,7 @@ async function load(){
 function render(){
   if(!D)return;const s=D.summary;
   document.getElementById('brand-meta').textContent=`${D.module_name} · -${D.pipeline}`;
-  document.getElementById('nav-pass-count').textContent=s.passes_with_changes;
+  document.getElementById('nav-pass-count').textContent=changedCount(s);
   document.getElementById('sidebar-footer').textContent=`${s.total_events} events`;
   renderOverview();renderFunctions();renderPasses();triggerReveals();
   aiInitSessions();
@@ -642,7 +642,7 @@ function renderOverview(){
   const iPct=s.total_instructions_before?Math.round(iRed/s.total_instructions_before*100):0;
   const cgRed=s.codegen_asm_lines_before-s.codegen_asm_lines_after;
   const cgPct=s.codegen_asm_lines_before?Math.round(cgRed/s.codegen_asm_lines_before*100):0;
-  const changedPasses=s.passes_with_changes,totalAfter=s.total_after;
+  const changedPasses=changedCount(s),totalAfter=s.total_after;
   const efficiency=totalAfter?Math.round(changedPasses/totalAfter*100):0;
 
   const cards=[
@@ -1131,6 +1131,9 @@ function exportCSV(){
 
 // ===== UTILS =====
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+// Passes-with-IR-changes, with fallback for histories written before
+// passes_with_ir_changes existed (then it equals the metric count).
+function changedCount(s){return (s.passes_with_ir_changes==null)?s.passes_with_changes:s.passes_with_ir_changes}
 
 // ===== FILTERS =====
 document.querySelectorAll('.filter-btn').forEach(b=>{b.addEventListener('click',()=>{document.querySelectorAll('.filter-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');F=b.dataset.filter;renderEvents()})});
@@ -1426,7 +1429,7 @@ function buildAIContext(){
   const s=D.summary,L=[];
   L.push(`MODULE: ${D.module_name}`);
   L.push(`PIPELINE: -${D.pipeline}`);
-  L.push(`SUMMARY: ${s.total_before} pass executions (before events), ${s.passes_with_changes} pass executions changed IR, ${s.total_invalidated} invalidated`);
+  L.push(`SUMMARY: ${s.total_before} pass executions (before events), ${changedCount(s)} pass executions changed IR, ${s.total_invalidated} invalidated`);
   L.push(`IR INSTRUCTIONS (module level): ${s.total_instructions_before} -> ${s.total_instructions_after} (${s.total_instructions_after - s.total_instructions_before > 0 ? '+' : ''}${s.total_instructions_after - s.total_instructions_before})`);
   L.push(`BASIC BLOCKS (module level): ${s.total_bbs_before} -> ${s.total_bbs_after} (${s.total_bbs_after - s.total_bbs_before > 0 ? '+' : ''}${s.total_bbs_after - s.total_bbs_before})`);
   L.push(`CODEGEN ASM LINES: ${s.codegen_asm_lines_before} -> ${s.codegen_asm_lines_after} (${s.codegen_asm_lines_after - s.codegen_asm_lines_before > 0 ? '+' : ''}${s.codegen_asm_lines_after - s.codegen_asm_lines_before})`);

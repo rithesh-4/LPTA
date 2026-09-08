@@ -155,6 +155,7 @@ def check_consistency(json_path):
     ac = sum(1 for e in events if e["event_type"] == "after")
     ic = sum(1 for e in events if e["event_type"] == "invalidated")
     cc = sum(1 for e in events if e["event_type"] == "after" and e.get("has_changes"))
+    ic = sum(1 for e in events if e["event_type"] == "after" and (e.get("has_changes") or e.get("ir_changed")))
 
     if s["total_before"] != bc:
         issues.append(f"summary.total_before={s['total_before']} != {bc}")
@@ -164,6 +165,8 @@ def check_consistency(json_path):
         issues.append(f"summary.total_invalidated={s['total_invalidated']} != {ic}")
     if s["passes_with_changes"] != cc:
         issues.append(f"summary.passes_with_changes={s['passes_with_changes']} != {cc}")
+    if "passes_with_ir_changes" in s and s["passes_with_ir_changes"] != ic:
+        issues.append(f"summary.passes_with_ir_changes={s['passes_with_ir_changes']} != {ic}")
     if s["total_events"] != len(events):
         issues.append(f"summary.total_events={s['total_events']} != {len(events)}")
 

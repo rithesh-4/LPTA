@@ -1523,13 +1523,17 @@ int main(int argc, char **argv) {
     if (stack_unbalanced) errs() << " (WARNING: stack not empty!)";
     errs() << "\n";
 
-    // Count passes with changes
-    unsigned changed = 0, snap_kept = 0;
+    // Count passes with changes (metric counters) and with any IR change
+    // (either flag — matches the dashboard "Changed" filter).
+    unsigned changed = 0, ir_changed_ct = 0, snap_kept = 0;
     for (auto &e : g_events) {
-        if (e.event_type == "after" && e.has_changes) changed++;
-        if (e.event_type == "after" && !e.ir_before.empty()) snap_kept++;
+        if (e.event_type != "after") continue;
+        if (e.has_changes) changed++;
+        if (e.has_changes || e.ir_changed) ir_changed_ct++;
+        if (!e.ir_before.empty()) snap_kept++;
     }
-    errs() << "  Passes with changes: " << changed << "\n";
+    errs() << "  Passes with changes: " << changed << " (metrics) / "
+           << ir_changed_ct << " (any IR change)\n";
     if (g_snapshots && changed > 0 && snap_kept == 0) {
         errs() << "  NOTE: --snapshots enabled but no IR snapshots were kept:\n"
                << "        no allowlisted pass changed the IR (or every pair exceeded the "
