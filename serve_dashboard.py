@@ -496,6 +496,8 @@ class LPTAHandler(SimpleHTTPRequestHandler):
             payload = json.loads(raw or b"{}")
         except (ValueError, json.JSONDecodeError):
             return self._send_json(400, {"error": "invalid JSON body"})
+        if not isinstance(payload, dict):
+            return self._send_json(400, {"error": "JSON body must be an object"})
 
         messages = payload.get("messages")
         if not isinstance(messages, list) or not messages:
@@ -574,6 +576,8 @@ class LPTAHandler(SimpleHTTPRequestHandler):
             payload = json.loads(raw or b"{}")
         except (ValueError, json.JSONDecodeError):
             return self._send_json(400, {"error": "invalid JSON body"})
+        if not isinstance(payload, dict):
+            return self._send_json(400, {"error": "JSON body must be an object"})
 
         base_data = payload.get("base")
         curr_data = payload.get("current")

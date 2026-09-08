@@ -1723,18 +1723,26 @@ async function runCompare(){
   const results=document.getElementById('compare-results');
   results.style.display='block';
   results.innerHTML='<div class="compare-empty">Running comparison...</div>';
+  let cmp;
   try{
     const resp=await fetch('/api/compare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({base:COMPARE_BASE,current:COMPARE_CURR})});
     if(!resp.ok)throw new Error('Compare failed');
-    const cmp=await resp.json();
-    COMPARE_RESULT=cmp;
-    renderCompareResults(cmp);
-    document.getElementById('compare-export-btn').style.display='';
+    cmp=await resp.json();
   }catch(err){
     const noBackend=err instanceof TypeError;
     results.innerHTML='<div class="compare-empty" style="color:var(--red)">Error: '+(noBackend
       ?'Compare backend not reachable. Serve this report with <code>python serve_dashboard.py</code> instead of plain <code>http.server</code>, or run <code>lpta_test --compare base.json curr.json</code>.'
-      :err.message)+'</div>';
+      :esc(err.message))+'</div>';
+    btn.disabled=false;
+    btn.textContent='Run Comparison';
+    return;
+  }
+  try{
+    COMPARE_RESULT=cmp;
+    renderCompareResults(cmp);
+    document.getElementById('compare-export-btn').style.display='';
+  }catch(err){
+    results.innerHTML='<div class="compare-empty" style="color:var(--red)">Error: unexpected compare response ('+esc(err.message||'render failed')+'). Try regenerating both history files.</div>';
   }
   btn.disabled=false;
   btn.textContent='Run Comparison';
