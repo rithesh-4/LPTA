@@ -495,7 +495,7 @@ The C++ source code contains `assert()` statements that verify counting invarian
 
 ### 6. Unit Tests
 
-81 unit tests (`tests/test_utilities.cpp`) verify utility functions, delta calculations, JSON escaping, pass classification, IR-level metric counting (invoke/callbr), opcode-group partitioning, IR-hash determinism/sensitivity, filename sanitizing (length/reserved/trailing-dot), and edge cases.
+87 unit tests (`tests/test_utilities.cpp`) verify utility functions, delta calculations, JSON escaping, pass classification (incl. unmarked analyses), IR-level metric counting (invoke/callbr), opcode-group partitioning, IR-hash determinism/sensitivity, filename sanitizing (length/reserved/trailing-dot), and edge cases.
 
 ### 7. Fuzz Testing
 
