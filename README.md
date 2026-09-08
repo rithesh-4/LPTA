@@ -309,6 +309,7 @@ python ../serve_dashboard.py . -p 8080
 | "Stack remaining: N (WARNING)" | PassFrame stack imbalance — bug in pass matching |
 | Cross-target fails | Ensure `llc` is in PATH or LLVM_DIR (bundled works) |
 | Compare tab shows "backend not reachable" | Serve with `python serve_dashboard.py` (not plain `http.server`), or use `./build/lpta_test.exe --compare base.json curr.json` |
+| Garbled `history.json` / missing snapshots | One run per report directory at a time — concurrent runs into the same dir corrupt each other's outputs |
 | AI panel shows "no backend" | `export NVIDIA_API_KEY=nvapi-...` then restart server |
 
 ### Files You'll Generate
