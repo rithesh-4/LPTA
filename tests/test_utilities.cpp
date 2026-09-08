@@ -256,6 +256,15 @@ void test_sanitize_length_cap() {
     CHECK(sanitizeFilename("short") == "short", "sanitizeFilename: short names untouched");
 }
 
+void test_sanitize_windows_reserved() {
+    CHECK(sanitizeFilename("CON") == "CON_", "sanitizeFilename: CON suffixed");
+    CHECK(sanitizeFilename("nul") == "nul_", "sanitizeFilename: nul (any case) suffixed");
+    CHECK(sanitizeFilename("COM1") == "COM1_", "sanitizeFilename: COM1 suffixed");
+    CHECK(sanitizeFilename("nul.ll") == "nul.ll", "sanitizeFilename: extension makes it legal");
+    CHECK(sanitizeFilename("trailing.") == "trailing._", "sanitizeFilename: trailing dot suffixed");
+    CHECK(sanitizeFilename("plain") == "plain", "sanitizeFilename: normal names untouched");
+}
+
 // ============================================================
 // shouldSnapshot
 // ============================================================
@@ -549,6 +558,7 @@ int main() {
     test_sanitize_dots();
     test_sanitize_angle();
     test_sanitize_length_cap();
+    test_sanitize_windows_reserved();
 
     printf("\nshouldSnapshot / allowlist:\n");
     test_snapshot_default_off();
