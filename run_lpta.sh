@@ -18,6 +18,8 @@ Usage: bash run_lpta.sh [input.ll] [report_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--sna
   -O0..-Oz        Optimization level (default: -O2, last one wins)
   --snapshots     Save per-pass IR snapshots
   --targets=...   common | triple,... | @file
+  --              End of flags (following args are paths)
+  --version       Build, then print the tool + LLVM version
 
 Environment:
   LLVM_DIR        LLVM install prefix (auto-detected via llvm-config or bundled dir)
@@ -83,6 +85,7 @@ REPORT_POS=""
 OPT_LEVEL=""
 SNAPSHOTS=""
 TARGETS=""
+SHOW_VERSION=""
 END_OF_FLAGS=0
 add_positional() {
   if [ -z "$INPUT" ]; then
@@ -107,6 +110,7 @@ for arg in "$@"; do
   fi
   case "$arg" in
     -h|--help) usage; exit 0 ;;
+    --version|-version) SHOW_VERSION=1 ;;
     --snapshots) SNAPSHOTS="--snapshots" ;;
     --targets=*) TARGETS="$arg" ;;
     -O0|-O1|-O2|-O3|-Os|-Oz) OPT_LEVEL="$arg" ;;
@@ -133,7 +137,7 @@ case "$BUILD_DIR" in
   *) BUILD_DIR="$ROOT/$BUILD_DIR" ;;
 esac
 
-if [ ! -f "$INPUT" ]; then
+if [ -z "$SHOW_VERSION" ] && [ ! -f "$INPUT" ]; then
     echo "ERROR: input file not found: '$INPUT'" >&2
     exit 1
 fi
@@ -185,6 +189,12 @@ if [ -z "$LPTA_BIN" ]; then
     echo "ERROR: lpta_test binary not found after build (looked in $BUILD_DIR)." >&2
     echo "See $BUILD_DIR/ninja.log for details." >&2
     exit 1
+fi
+
+# Passthrough query: build, then report the tool version.
+if [ -n "$SHOW_VERSION" ]; then
+    "$LPTA_BIN" --version
+    exit $?
 fi
 
 # Run (capture full output; show a filtered summary but never hide failures).

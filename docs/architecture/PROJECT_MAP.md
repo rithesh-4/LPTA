@@ -35,6 +35,7 @@ C:\LLVM-full\
 │   ├── validate_correctness.sh ← independent recount + opt -stats cross-validation
 │   ├── fuzz_runner.sh          ← 300 mutated inputs, no crash/hang/corrupt allowed
 │   ├── test_utilities.cpp      ← unit tests → build/test_utilities.exe
+│   ├── count_ir.py             ← shared independent IR counter (validate + demo)
 │   ├── tiny_proof.ll           ← hand-countable IR: 2 fns, 5 BBs, 12 instrs
 │   └── edge_cases/             ← per-scenario IR inputs + python verifiers
 │
