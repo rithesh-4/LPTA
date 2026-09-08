@@ -1691,18 +1691,21 @@ function loadCompareFile(e,which){
   const nameEl=document.getElementById(which==='base'?'base-file-name':'curr-file-name');
   const r=new FileReader();
   // Invalid JSON must surface as a visible error, not an uncaught exception.
+  const fail=msg=>{
+    if(which==='base')COMPARE_BASE=null;else COMPARE_CURR=null;
+    nameEl.textContent=f.name+' — '+msg;nameEl.style.color='var(--red)';
+    updateCompareBtn();
+  };
   r.onload=()=>{
     try{
       const parsed=JSON.parse(r.result);
       if(!parsed||!Array.isArray(parsed.events)){throw new Error('not an LPTA history file (missing events array)')}
       if(which==='base')COMPARE_BASE=parsed;else COMPARE_CURR=parsed;
       nameEl.textContent=f.name;nameEl.style.color='';
-    }catch(err){
-      if(which==='base')COMPARE_BASE=null;else COMPARE_CURR=null;
-      nameEl.textContent=f.name+' — invalid JSON ('+err.message+')';nameEl.style.color='var(--red)';
-    }
+    }catch(err){fail('invalid JSON ('+err.message+')')}
     updateCompareBtn();
   };
+  r.onerror=()=>fail('could not read file');
   r.readAsText(f);
 }
 function loadBaseFile(e){loadCompareFile(e,'base')}

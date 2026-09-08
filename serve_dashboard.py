@@ -542,9 +542,7 @@ class LPTAHandler(SimpleHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", 0))
         except (TypeError, ValueError):
-            return None, 0
-        if length < 0:
-            return None, length
+            length = 0
         if length > MAX_BODY_BYTES:
             remaining = length
             while remaining > 0:
@@ -553,7 +551,7 @@ class LPTAHandler(SimpleHTTPRequestHandler):
                     break
                 remaining -= len(chunk)
             return None, length
-        return self.rfile.read(length), length
+        return self.rfile.read(max(length, 0)), length
 
     def _send_json(self, code, obj):
         data = json.dumps(obj).encode("utf-8")
