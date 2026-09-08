@@ -195,14 +195,22 @@ echo "" | tee -a "$REPORT"
 echo "Source 3: LLVM opt -stats Cross-Validation" | tee -a "$REPORT"
 
 # Find opt (also try opt.exe: Windows distributions ship suffixed binaries
-# that `command -v opt` and bare-path probes miss)
+# that `command -v opt` and bare-path probes miss). Falls back to the
+# bundled distro next to the repo so layer 3 engages out of the box.
 OPT=""
 if command -v opt &>/dev/null; then
     OPT="opt"
 elif command -v opt.exe &>/dev/null; then
     OPT="opt.exe"
 else
-    for _dir in "${LLVM_DIR:-}" "${LLVM_INSTALL_DIR:-}"; do
+    _bundled=""
+    for _cand in "$SCRIPT_DIR/../clang+llvm-"/ clang+llvm-*/; do
+        # First glob that resolves to a real directory wins
+        for _d in $_cand; do
+            if [ -d "$_d" ]; then _bundled="$_d"; break 2; fi
+        done
+    done
+    for _dir in "${LLVM_DIR:-}" "${LLVM_INSTALL_DIR:-}" "$_bundled"; do
         for _exe in opt opt.exe; do
             if [ -n "$_dir" ] && [ -x "$_dir/bin/$_exe" ]; then
                 OPT="$_dir/bin/$_exe"
