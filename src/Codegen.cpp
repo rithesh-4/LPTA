@@ -72,9 +72,21 @@ std::string findLlcExe() {
     };
 
     // 1. Check LLVM_DIR environment variable (most reliable)
+    // LLVM_DIR often points at <prefix>/lib/cmake/llvm (CMake config dir),
+    // not <prefix> itself, so also probe ancestor directories.
     if (const char *env = std::getenv("LLVM_DIR")) {
-        std::string r = tryFind(std::string(env));
+        std::string base(env);
+        std::string r = tryFind(base);
         if (!r.empty()) return r;
+        fs::path p(base);
+        for (int depth = 0; depth < 4; ++depth) {
+            p = p.parent_path();
+            if (p.empty()) break;
+            r = tryFind(p.string());
+            if (!r.empty()) return r;
+            // Also try <ancestor>/bin directly (tryFind appends /bin/llc,
+            // so this covers <prefix>/bin/llc from a cmake-dir start).
+        }
     }
 
     // 2. Check CMAKE_PREFIX_PATH or LLVM_INSTALL_DIR if set via CMake
@@ -164,15 +176,17 @@ static void countAssembly(const std::string &asm_path,
     std::error_code ec;
     lines = 0;
     bytes = 0;
-    if (!fs::exists(asm_path, ec)) return;
+    if (!fs::exists(asm_path, ec) || ec) return;
     std::ifstream f(asm_path);
+    if (!f.is_open()) return;
     std::string line;
     while (std::getline(f, line)) {
         lines++;
     }
     std::error_code ec2;
-    if (!ec)
-        bytes = static_cast<unsigned>(fs::file_size(asm_path, ec2));
+    auto sz = fs::file_size(asm_path, ec2);
+    if (!ec2)
+        bytes = static_cast<unsigned>(sz);
 }
 
 // ============================================================
@@ -215,25 +229,49 @@ int runLlc(const std::string &llc, const std::string &input,
         cmd_args += " -mtriple=" + q;
     }
     // cpu/features omitted in v1 (use target defaults)
-    // Quote file paths for cmd.exe
+    // Quote file paths for cmd.exe (CmdLineToArgvW rules: escape inner
+    // quotes and double trailing backslashes so they survive the closing
+    // quote).
     auto winQuote = [](const std::string &s) {
         std::string r = "\"";
         for (char c : s) {
             if (c == '"') r += "\\\"";
             else r += c;
         }
+        // Double trailing backslashes before the closing quote
+        size_t trailing = 0;
+        for (size_t i = s.size(); i > 0 && s[i - 1] == '\\'; --i) trailing++;
+        r.append(trailing, '\\');
         r += '"';
         return r;
     };
     cmd_args += " -o " + winQuote(abs_output) + " " + winQuote(abs_input);
 
     // On Windows, system() uses cmd.exe which chokes on nested quotes.
-    // Write a temp .bat file and execute that instead.
-    std::string bat = abs_output + ".run_llc.bat";
+    // Write a temp .bat file and execute that instead. The .bat name is
+    // PID-suffixed so concurrent runs sharing output_dir cannot collide.
+    // % is escaped as %% (cmd.exe expands %VAR% even inside quotes) and
+    // delayed expansion is disabled so ! stays literal.
+    std::string bat;
+#ifdef _WIN32
+    bat = abs_output + "." + std::to_string(GetCurrentProcessId()) + ".run_llc.bat";
+#else
+    bat = abs_output + ".run_llc.bat";
+#endif
     {
         std::ofstream b(bat);
         b << "@echo off\n";
-        b << "\"" << abs_llc << "\" " << cmd_args << "\n";
+        b << "setlocal DisableDelayedExpansion\n";
+        auto escapeBatPct = [](const std::string &s) {
+            std::string r;
+            r.reserve(s.size());
+            for (char c : s) {
+                if (c == '%') r += "%%";
+                else r += c;
+            }
+            return r;
+        };
+        b << "\"" << escapeBatPct(abs_llc) << "\" " << escapeBatPct(cmd_args) << "\n";
     }
     int rc = system(("call \"" + bat + "\"").c_str());
     std::error_code ec_rm;
@@ -266,8 +304,11 @@ CodegenResult measureCodegen(const std::string &ir_before_path,
 
     // Remove any stale assembly from previous runs so a failed llc invocation
     // cannot be silently attributed to leftover files.
-    fs::remove(before_asm);
-    fs::remove(after_asm);
+    {
+        std::error_code ec_rm;
+        fs::remove(before_asm, ec_rm);
+        fs::remove(after_asm, ec_rm);
+    }
 
     int rc1 = runLlc(llc, ir_before_path, before_asm, "", "", "");
     int rc2 = runLlc(llc, ir_after_path, after_asm, "", "", "");
@@ -308,6 +349,7 @@ CodegenResult measureCodegenMultiTarget(
 
     // 2. Cross-targets — each target runs llc independently (M6 fix:
     // native reuse removed due to LLVM 22 API limitations).
+    std::map<std::string, unsigned> sanitized_use_count;
     for (const auto &target : config.targets) {
         std::string triple = normalizeTargetTriple(target);
 
@@ -320,14 +362,20 @@ CodegenResult measureCodegenMultiTarget(
         }
 
         std::string sanitized = sanitizeFilename(target);
-        // Avoid sanitized collision (M5) by appending hash when collision detected
+        // Avoid sanitized collision by appending a counter suffix when two
+        // distinct targets sanitize to the same filename stem.
+        unsigned use = sanitized_use_count[sanitized]++;
+        if (use > 0) sanitized += "_" + std::to_string(use);
         // Note: sanitizeFilename collisions are rare; we keep map key as original target,
         // but need distinct filenames for overlapping sanitized names.
         std::string before_asm = output_dir + "/codegen_" + sanitized + "_before.s";
         std::string after_asm  = output_dir + "/codegen_" + sanitized + "_after.s";
         // Remove stale files before run (M4 fix)
-        fs::remove(before_asm);
-        fs::remove(after_asm);
+        {
+            std::error_code ec_rm;
+            fs::remove(before_asm, ec_rm);
+            fs::remove(after_asm, ec_rm);
+        }
 
         TargetCodegenResult tr;
         int rc1 = runLlc(llc, ir_before_path, before_asm, triple, "", "");

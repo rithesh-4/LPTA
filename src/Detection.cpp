@@ -79,3 +79,21 @@ std::string serializeIR(const Any &IR) {
     }
     return buf;
 }
+
+// FNV-1a 64-bit over the canonical serialization. hashIRUnit(a) ==
+// hashIRUnit(b) iff the printed IR text is byte-identical, so any textual
+// IR mutation (operands, constants, attributes, ordering) flips the hash
+// even when all structural metric counters are unchanged.
+uint64_t hashIRUnit(const Any &IR) {
+    return hashIRText(serializeIR(IR));
+}
+
+uint64_t hashIRText(const std::string &s) {
+    if (s.empty()) return 0;
+    uint64_t h = 14695981039346656037ULL;  // FNV offset basis
+    for (unsigned char c : s) {
+        h ^= c;
+        h *= 1099511628211ULL;  // FNV prime
+    }
+    return h;
+}

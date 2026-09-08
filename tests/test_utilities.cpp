@@ -86,6 +86,13 @@ void test_hasAnyDelta_same_extreme() {
     CHECK(!hasAnyDelta(a, b), "hasAnyDelta: both UINT32_MAX -> false");
 }
 
+void test_hasAnyDelta_opgroup() {
+    IRMetrics a, b;
+    a.op_arith = 3;
+    b.op_arith = 4;
+    CHECK(hasAnyDelta(a, b), "hasAnyDelta: op_arith differs -> true");
+}
+
 // ============================================================
 // jsonEscape
 // ============================================================
@@ -407,6 +414,57 @@ void test_module_function_call_agreement() {
 }
 
 // ============================================================
+// hashIRUnit / hashIRText (real IR-change detection)
+// ============================================================
+void test_hash_deterministic() {
+    llvm::LLVMContext Ctx;
+    auto M = parseTestIR(Ctx, kInvokeIR);
+    CHECK(M != nullptr, "parseTestIR: hash determinism IR parses");
+    if (!M) return;
+    llvm::Any a = static_cast<const llvm::Function *>(M->getFunction("with_invoke"));
+    CHECK(hashIRUnit(a) == hashIRUnit(a), "hashIRUnit: same IR -> same hash");
+    CHECK(hashIRUnit(a) != 0, "hashIRUnit: nonzero for real IR");
+}
+
+void test_hash_sensitive_to_operands() {
+    static const char kA[] = "define i32 @f(i32 %x) {\nentry:\n  %a = add i32 %x, 1\n  ret i32 %a\n}\n";
+    static const char kB[] = "define i32 @f(i32 %x) {\nentry:\n  %a = add i32 %x, 2\n  ret i32 %a\n}\n";
+    llvm::LLVMContext CtxA, CtxB;
+    auto MA = parseTestIR(CtxA, kA);
+    auto MB = parseTestIR(CtxB, kB);
+    CHECK(MA != nullptr && MB != nullptr, "parseTestIR: operand-variant IR parses");
+    if (!MA || !MB) return;
+    llvm::Any a = static_cast<const llvm::Function *>(MA->getFunction("f"));
+    llvm::Any b = static_cast<const llvm::Function *>(MB->getFunction("f"));
+    IRMetrics mA = captureFunctionMetrics(*MA->getFunction("f"));
+    IRMetrics mB = captureFunctionMetrics(*MB->getFunction("f"));
+    CHECK(!hasAnyDelta(mA, mB), "hash test setup: operand edit moves no counters");
+    CHECK(hashIRUnit(a) != hashIRUnit(b), "hashIRUnit: add 1 vs add 2 -> different hash");
+}
+
+void test_hash_unknown_is_zero() {
+    llvm::Any empty;
+    CHECK(hashIRUnit(empty) == 0, "hashIRUnit: Unknown unit -> 0 (never reports change)");
+    CHECK(hashIRText("") == 0, "hashIRText: empty text -> 0");
+    CHECK(hashIRText("x") != 0, "hashIRText: nonempty text -> nonzero");
+}
+
+void test_opcode_partition() {
+    llvm::LLVMContext Ctx;
+    auto M = parseTestIR(Ctx, kInvokeIR);
+    CHECK(M != nullptr, "parseTestIR: partition IR parses");
+    if (!M) return;
+    IRMetrics m = captureFunctionMetrics(*M->getFunction("with_invoke"));
+    // with_invoke: invoke (->call), ret+resume (->control), landingpad (->other)
+    CHECK_EQ(m.op_call, 1u, "partition: invoke counted in op_call");
+    CHECK_EQ(m.op_control, 2u, "partition: ret+resume counted in op_control");
+    CHECK_EQ(m.op_other, 1u, "partition: landingpad counted in op_other");
+    unsigned sum = m.op_arith + m.op_cmp + m.op_memory + m.op_control +
+                   m.op_cast + m.op_call + m.op_vector + m.op_other;
+    CHECK_EQ(sum, m.instruction_count, "partition: groups sum to instruction_count");
+}
+
+// ============================================================
 // writeHistoryJSON schema stability
 // ============================================================
 
@@ -438,6 +496,7 @@ int main() {
     test_hasAnyDelta_return();
     test_hasAnyDelta_extreme();
     test_hasAnyDelta_same_extreme();
+    test_hasAnyDelta_opgroup();
 
     printf("\njsonEscape:\n");
     test_jsonEscape_empty();
@@ -468,6 +527,12 @@ int main() {
 
     printf("\nirUnitKindName:\n");
     test_kind_names();
+
+    printf("\nhashIRUnit / hashIRText:\n");
+    test_hash_deterministic();
+    test_hash_sensitive_to_operands();
+    test_hash_unknown_is_zero();
+    test_opcode_partition();
 
     printf("\nsanitizeFilename:\n");
     test_sanitize_normal();

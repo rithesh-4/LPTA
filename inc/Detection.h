@@ -26,3 +26,12 @@ const void *irUnitPointer(const llvm::Any &IR);
 
 // Serialize IR unit to string for snapshots
 std::string serializeIR(const llvm::Any &IR);
+
+// FNV-1a 64-bit hash of the serialized IR unit. Used to detect real IR
+// changes that leave all structural counters identical (e.g. constant
+// folds). Returns 0 for unsupported (Unknown) units, which cannot hash.
+uint64_t hashIRUnit(const llvm::Any &IR);
+
+// Hash already-serialized IR text (lets callers serialize once and reuse
+// the text for both hashing and snapshots).
+uint64_t hashIRText(const std::string &s);

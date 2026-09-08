@@ -55,7 +55,15 @@ void writeMetricsJSON(std::ostream &os, const IRMetrics &m, const std::string &p
        << pad << "\"store_count\": " << m.store_count << ",\n"
        << pad << "\"branch_count\": " << m.branch_count << ",\n"
        << pad << "\"phi_count\": " << m.phi_count << ",\n"
-       << pad << "\"return_count\": " << m.return_count << "\n";
+       << pad << "\"return_count\": " << m.return_count << ",\n"
+       << pad << "\"op_arith\": " << m.op_arith << ",\n"
+       << pad << "\"op_cmp\": " << m.op_cmp << ",\n"
+       << pad << "\"op_memory\": " << m.op_memory << ",\n"
+       << pad << "\"op_control\": " << m.op_control << ",\n"
+       << pad << "\"op_cast\": " << m.op_cast << ",\n"
+       << pad << "\"op_call\": " << m.op_call << ",\n"
+       << pad << "\"op_vector\": " << m.op_vector << ",\n"
+       << pad << "\"op_other\": " << m.op_other << "\n";
 }
 
 void writeHistoryJSON(const std::string &filename, const CodegenResult &cg) {
@@ -105,7 +113,8 @@ void writeHistoryJSON(const std::string &filename, const CodegenResult &cg) {
             writeMetricsJSON(f, e.metrics_after, "        ");
             f << "      },\n";
             f << "      \"has_changes\": " << (e.has_changes ? "true" : "false") << ",\n";
-            if (e.has_changes && !e.ir_before.empty()) {
+            f << "      \"ir_changed\": " << (e.ir_changed ? "true" : "false") << ",\n";
+            if ((e.has_changes || e.ir_changed) && !e.ir_before.empty()) {
                 f << "      \"ir_before\": \"" << jsonEscape(e.ir_before) << "\",\n";
                 f << "      \"ir_after\": \"" << jsonEscape(e.ir_after) << "\"\n";
             } else {

@@ -152,10 +152,10 @@ def compare_histories(base, curr):
         d["phi_delta"] += ma.get("phi_count", 0) - mb.get("phi_count", 0)
 
     for e in base.get("events", []):
-        if e.get("event_type") == "after" and e.get("has_changes"):
+        if e.get("event_type") == "after" and (e.get("has_changes") or e.get("ir_changed")):
             _accumulate_pass(base_passes, e)
     for e in curr.get("events", []):
-        if e.get("event_type") == "after" and e.get("has_changes"):
+        if e.get("event_type") == "after" and (e.get("has_changes") or e.get("ir_changed")):
             _accumulate_pass(curr_passes, e)
 
     all_pass_names = sorted(set(base_passes.keys()) | set(curr_passes.keys()))
@@ -549,8 +549,23 @@ class LPTAHandler(SimpleHTTPRequestHandler):
         if not base_data or not curr_data:
             return self._send_json(400, {"error": "body must contain 'base' and 'current' history objects"})
 
+        def coerce_history(v):
+            # Accept a parsed history.json object or its raw JSON text.
+            if isinstance(v, dict):
+                return v
+            if isinstance(v, str):
+                return json.loads(v)
+            raise ValueError("history must be an object or a JSON string")
+
         try:
-            result = compare_histories(base_data, curr_data)
+            base = coerce_history(base_data)
+            curr = coerce_history(curr_data)
+        except (ValueError, json.JSONDecodeError):
+            return self._send_json(400, {
+                "error": "body 'base' and 'current' must be history.json objects (or JSON strings)"})
+
+        try:
+            result = compare_histories(base, curr)
             return self._send_json(200, result)
         except Exception as e:
             return self._send_json(500, {"error": f"comparison failed: {e}"})

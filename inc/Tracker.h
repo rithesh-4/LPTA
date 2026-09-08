@@ -21,6 +21,8 @@ struct PassFrame {
     bool invalidated = false;
     unsigned event_id = 0;  // Shared event ID for before/after pair
     std::string ir_before;  // IR text captured at BEFORE (only if snapshots enabled)
+    bool ir_before_dropped = false;  // True if BEFORE snapshot exceeded cap (pair must drop)
+    uint64_t before_hash = 0;  // FNV-1a hash of serialized IR at BEFORE (0 = unhashable)
 };
 
 extern std::vector<PassFrame> pass_stack;
@@ -33,13 +35,15 @@ struct Event {
     unsigned id = 0;
     std::string event_type;  // "before", "after", "invalidated"
     std::string pass_name;
-    std::string pass_type;   // "adaptor", "pipeline", "transformation", "analysis", "other"
+    std::string pass_type;   // "adaptor", "pipeline", "transformation", "analysis"
     std::string ir_kind;
     std::string ir_name;
     unsigned depth = 0;
     IRMetrics metrics_before;
     IRMetrics metrics_after;
-    bool has_changes = false;
+    bool has_changes = false;  // Any structural metric counter differs
+    bool ir_changed = false;   // Serialized IR hash differs (catches changes
+                               // invisible to counters, e.g. constant folds)
     std::string ir_before;  // IR text snapshot (before state)
     std::string ir_after;   // IR text snapshot (after state)
 };

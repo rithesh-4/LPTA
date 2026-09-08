@@ -58,12 +58,20 @@ struct CompareEvent {
     std::string event_type;
     std::string pass_name;
     bool has_changes = false;
+    bool ir_changed = false;
     unsigned instr_before = 0, instr_after = 0;
     unsigned bb_before = 0, bb_after = 0;
     unsigned load_before = 0, load_after = 0;
     unsigned store_before = 0, store_after = 0;
     unsigned branch_before = 0, branch_after = 0;
     unsigned phi_before = 0, phi_after = 0;
+};
+
+struct CompareTarget {
+    std::string name;
+    long long lines_before = 0, lines_after = 0;
+    long long bytes_before = 0, bytes_after = 0;
+    std::string error;  // empty = success
 };
 
 static std::string trimWS(const std::string &s) {
@@ -80,7 +88,7 @@ static int parseJsonInt(const std::string &line, const std::string &key) {
     if (pos == std::string::npos) return 0;
     auto val = line.find_first_not_of(" \t", pos + 1);
     if (val == std::string::npos) return 0;
-    auto end = line.find_first_of(",\n\r", val);
+    auto end = line.find_first_of(",\n\r ]}", val);
     std::string num = trimWS(line.substr(val, end == std::string::npos ? std::string::npos : end - val));
     // Handle null
     if (num == "null" || num == "true" || num == "false") return 0;
@@ -94,8 +102,18 @@ static std::string parseJsonString(const std::string &line, const std::string &k
     if (pos == std::string::npos) return "";
     auto q1 = line.find('"', pos + 1);
     if (q1 == std::string::npos) return "";
-    auto q2 = line.find('"', q1 + 1);
-    if (q2 == std::string::npos) return "";
+    // Find closing quote, skipping escaped quotes (\")
+    auto q2 = q1 + 1;
+    while (true) {
+        q2 = line.find('"', q2);
+        if (q2 == std::string::npos) return "";
+        // Count consecutive backslashes immediately before q2: odd => escaped
+        size_t bs = 0;
+        size_t k = q2;
+        while (k > q1 + 1 && line[k - 1] == '\\') { bs++; k--; }
+        if (bs % 2 == 0) break;  // unescaped quote
+        q2++;  // escaped, keep searching
+    }
     return line.substr(q1 + 1, q2 - q1 - 1);
 }
 
@@ -107,6 +125,24 @@ static bool parseJsonBool(const std::string &line, const std::string &key) {
     auto val = line.find_first_not_of(" \t", pos + 1);
     if (val == std::string::npos) return false;
     return line.compare(val, 4, "true") == 0;
+}
+
+// First quoted string on the line (for map keys like target triples in
+// "codegen_targets"). Skips escaped quotes; JSON escapes stay encoded,
+// which is consistent between the two files being compared.
+static std::string parseFirstQuoted(const std::string &line) {
+    auto q1 = line.find('"');
+    if (q1 == std::string::npos) return "";
+    auto q2 = q1 + 1;
+    while (true) {
+        q2 = line.find('"', q2);
+        if (q2 == std::string::npos) return "";
+        size_t bs = 0, k = q2;
+        while (k > q1 + 1 && line[k - 1] == '\\') { bs++; k--; }
+        if (bs % 2 == 0) break;  // unescaped quote
+        q2++;
+    }
+    return line.substr(q1 + 1, q2 - q1 - 1);
 }
 
 static long long pctDelta(long long old_val, long long new_val) {
@@ -128,11 +164,14 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
     long long baseBbBefore = 0, baseBbAfter = 0;
     long long baseCgLinesBefore = 0, baseCgLinesAfter = 0;
     std::vector<CompareEvent> baseEvents;
+    std::vector<CompareTarget> baseTargets;
 
     {
         bool inEvents = false;
         bool inMetricsBefore = false, inMetricsAfter = false;
+        bool inTargets = false, inTargetObj = false;
         CompareEvent ev;
+        CompareTarget tev;
         while (std::getline(baseFile, line)) {
             if (!inEvents) {
                 // Top-level fields
@@ -154,8 +193,51 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                 v = parseJsonInt(line, "codegen_asm_lines_after");
                 if (v) baseCgLinesAfter = v;
 
-                if (line.find("\"events\"") != std::string::npos && line.find('[') != std::string::npos) {
-                    inEvents = true;
+                // Per-target codegen map (summary.codegen_targets). This
+                // branch also runs for summary lines after the events array
+                // closes, which is where codegen_targets lives.
+                if (line.find("\"codegen_targets\"") != std::string::npos) {
+                    // Writer emits {} inline when empty — nothing to parse.
+                    if (line.find("{}") == std::string::npos) inTargets = true;
+                } else if (inTargets) {
+                    if (!inTargetObj && line.find("\": {") != std::string::npos) {
+                        tev = CompareTarget();
+                        tev.name = parseFirstQuoted(line);
+                        if (!tev.name.empty()) inTargetObj = true;
+                    } else if (inTargetObj) {
+                        std::string t = trimWS(line);
+                        if (t == "}," || t == "}") {
+                            baseTargets.push_back(tev);
+                            tev = CompareTarget();
+                            inTargetObj = false;
+                        } else {
+                            int lv = parseJsonInt(line, "asm_lines_before");
+                            if (line.find("\"asm_lines_before\"") != std::string::npos) tev.lines_before = lv;
+                            lv = parseJsonInt(line, "asm_lines_after");
+                            if (line.find("\"asm_lines_after\"") != std::string::npos) tev.lines_after = lv;
+                            lv = parseJsonInt(line, "asm_bytes_before");
+                            if (line.find("\"asm_bytes_before\"") != std::string::npos) tev.bytes_before = lv;
+                            lv = parseJsonInt(line, "asm_bytes_after");
+                            if (line.find("\"asm_bytes_after\"") != std::string::npos) tev.bytes_after = lv;
+                            if (line.find("\"error\"") != std::string::npos) {
+                                std::string es = parseJsonString(line, "error");
+                                // null (no quotes) parses as "" — same as no error.
+                                if (!es.empty() && es != "null") tev.error = es;
+                            }
+                        }
+                    } else if (trimWS(line) == "},") {
+                        inTargets = false;  // end of codegen_targets map
+                    }
+                }
+
+                if (line.find("\"events\"") != std::string::npos) {
+                    auto bp = line.find('[', line.find("\"events\""));
+                    if (bp != std::string::npos) {
+                        // Empty array on one line ("events": []) — no events
+                        // to parse; stay out of events mode.
+                        std::string rest = trimWS(line.substr(bp + 1));
+                        if (rest.empty() || rest[0] != ']') inEvents = true;
+                    }
                 }
             } else {
                 // Inside events array
@@ -176,43 +258,69 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                 if (line.find("\"has_changes\"") != std::string::npos) {
                     ev.has_changes = parseJsonBool(line, "has_changes");
                 }
+                if (line.find("\"ir_changed\"") != std::string::npos) {
+                    ev.ir_changed = parseJsonBool(line, "ir_changed");
+                }
 
                 // Detect metrics_before / metrics_after blocks
                 if (line.find("\"metrics_before\"") != std::string::npos) inMetricsBefore = true;
                 if (line.find("\"metrics_after\"") != std::string::npos) { inMetricsAfter = true; inMetricsBefore = false; }
 
+                // Per-key accumulation: each metrics line carries exactly one
+                // key, so only assign fields whose key appears on this line.
+                // (Assigning all fields per line would overwrite previously
+                // parsed keys with zeros.)
                 if (inMetricsBefore || inMetricsAfter) {
-                    auto iv = parseJsonInt(line, "instruction_count");
-                    auto bb = parseJsonInt(line, "basic_block_count");
-                    auto ld = parseJsonInt(line, "load_count");
-                    auto st = parseJsonInt(line, "store_count");
-                    auto br = parseJsonInt(line, "branch_count");
-                    auto ph = parseJsonInt(line, "phi_count");
-                    if (iv || bb || ld || st || br || ph) {
-                        if (inMetricsBefore) {
-                            ev.instr_before = iv; ev.bb_before = bb; ev.load_before = ld;
-                            ev.store_before = st; ev.branch_before = br; ev.phi_before = ph;
-                        } else {
-                            ev.instr_after = iv; ev.bb_after = bb; ev.load_after = ld;
-                            ev.store_after = st; ev.branch_after = br; ev.phi_after = ph;
+                    auto assignMetric = [&](const std::string &key, unsigned &field) {
+                        if (line.find("\"" + key + "\"") != std::string::npos) {
+                            int v = parseJsonInt(line, key);
+                            field = (unsigned)(v < 0 ? 0 : v);
+                        }
+                    };
+                    if (inMetricsBefore) {
+                        assignMetric("instruction_count", ev.instr_before);
+                        assignMetric("basic_block_count", ev.bb_before);
+                        assignMetric("load_count", ev.load_before);
+                        assignMetric("store_count", ev.store_before);
+                        assignMetric("branch_count", ev.branch_before);
+                        assignMetric("phi_count", ev.phi_before);
+                    } else {
+                        assignMetric("instruction_count", ev.instr_after);
+                        assignMetric("basic_block_count", ev.bb_after);
+                        assignMetric("load_count", ev.load_after);
+                        assignMetric("store_count", ev.store_after);
+                        assignMetric("branch_count", ev.branch_after);
+                        assignMetric("phi_count", ev.phi_after);
+                    }
+                }
+
+                // End of event object (getline strips '\n', so match trimmed
+                // "}" for the final event and "}," for the rest).
+                {
+                    std::string t = trimWS(line);
+                    if (t == "}," || t == "}") {
+                        if (inMetricsBefore || inMetricsAfter) {
+                            inMetricsBefore = false;
+                            inMetricsAfter = false;
+                        } else if (!ev.event_type.empty()) {
+                            baseEvents.push_back(ev);
+                            ev = CompareEvent();
                         }
                     }
                 }
 
-                // End of event object
-                if (line.find("},") != std::string::npos || line.find("}\n") != std::string::npos) {
-                    if (inMetricsBefore || inMetricsAfter) {
-                        inMetricsBefore = false;
-                        inMetricsAfter = false;
-                    } else if (!ev.event_type.empty()) {
-                        baseEvents.push_back(ev);
-                        ev = CompareEvent();
-                    }
-                }
-
                 // End of events array
-                if (line.find("],") != std::string::npos && inEvents) {
-                    inEvents = false;
+                {
+                    std::string t = trimWS(line);
+                    if ((t == "]," || t == "]") && inEvents) {
+                        // Flush a pending event in case the closing brace
+                        // heuristic above missed it (e.g. minified JSON).
+                        if (!ev.event_type.empty()) {
+                            baseEvents.push_back(ev);
+                            ev = CompareEvent();
+                        }
+                        inEvents = false;
+                    }
                 }
             }
         }
@@ -230,11 +338,14 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
     long long currBbBefore = 0, currBbAfter = 0;
     long long currCgLinesBefore = 0, currCgLinesAfter = 0;
     std::vector<CompareEvent> currEvents;
+    std::vector<CompareTarget> currTargets;
 
     {
         bool inEvents = false;
         bool inMetricsBefore = false, inMetricsAfter = false;
+        bool inTargets = false, inTargetObj = false;
         CompareEvent ev;
+        CompareTarget tev;
         while (std::getline(currFile, line)) {
             if (!inEvents) {
                 auto s = parseJsonString(line, "pipeline");
@@ -254,8 +365,47 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                 v = parseJsonInt(line, "codegen_asm_lines_after");
                 if (v) currCgLinesAfter = v;
 
-                if (line.find("\"events\"") != std::string::npos && line.find('[') != std::string::npos) {
-                    inEvents = true;
+                // Per-target codegen map (see baseline parser above).
+                if (line.find("\"codegen_targets\"") != std::string::npos) {
+                    if (line.find("{}") == std::string::npos) inTargets = true;
+                } else if (inTargets) {
+                    if (!inTargetObj && line.find("\": {") != std::string::npos) {
+                        tev = CompareTarget();
+                        tev.name = parseFirstQuoted(line);
+                        if (!tev.name.empty()) inTargetObj = true;
+                    } else if (inTargetObj) {
+                        std::string t = trimWS(line);
+                        if (t == "}," || t == "}") {
+                            currTargets.push_back(tev);
+                            tev = CompareTarget();
+                            inTargetObj = false;
+                        } else {
+                            int lv = parseJsonInt(line, "asm_lines_before");
+                            if (line.find("\"asm_lines_before\"") != std::string::npos) tev.lines_before = lv;
+                            lv = parseJsonInt(line, "asm_lines_after");
+                            if (line.find("\"asm_lines_after\"") != std::string::npos) tev.lines_after = lv;
+                            lv = parseJsonInt(line, "asm_bytes_before");
+                            if (line.find("\"asm_bytes_before\"") != std::string::npos) tev.bytes_before = lv;
+                            lv = parseJsonInt(line, "asm_bytes_after");
+                            if (line.find("\"asm_bytes_after\"") != std::string::npos) tev.bytes_after = lv;
+                            if (line.find("\"error\"") != std::string::npos) {
+                                std::string es = parseJsonString(line, "error");
+                                if (!es.empty() && es != "null") tev.error = es;
+                            }
+                        }
+                    } else if (trimWS(line) == "},") {
+                        inTargets = false;  // end of codegen_targets map
+                    }
+                }
+
+                if (line.find("\"events\"") != std::string::npos) {
+                    auto bp = line.find('[', line.find("\"events\""));
+                    if (bp != std::string::npos) {
+                        // Empty array on one line ("events": []) — no events
+                        // to parse; stay out of events mode.
+                        std::string rest = trimWS(line.substr(bp + 1));
+                        if (rest.empty() || rest[0] != ']') inEvents = true;
+                    }
                 }
             } else {
                 if (line.find("\"event_type\"") != std::string::npos) {
@@ -275,36 +425,59 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                 if (line.find("\"has_changes\"") != std::string::npos) {
                     ev.has_changes = parseJsonBool(line, "has_changes");
                 }
+                if (line.find("\"ir_changed\"") != std::string::npos) {
+                    ev.ir_changed = parseJsonBool(line, "ir_changed");
+                }
                 if (line.find("\"metrics_before\"") != std::string::npos) inMetricsBefore = true;
                 if (line.find("\"metrics_after\"") != std::string::npos) { inMetricsAfter = true; inMetricsBefore = false; }
+                // Per-key accumulation: each metrics line carries exactly one
+                // key, so only assign fields whose key appears on this line.
+                // (Assigning all fields per line would overwrite previously
+                // parsed keys with zeros.)
                 if (inMetricsBefore || inMetricsAfter) {
-                    auto iv = parseJsonInt(line, "instruction_count");
-                    auto bb = parseJsonInt(line, "basic_block_count");
-                    auto ld = parseJsonInt(line, "load_count");
-                    auto st = parseJsonInt(line, "store_count");
-                    auto br = parseJsonInt(line, "branch_count");
-                    auto ph = parseJsonInt(line, "phi_count");
-                    if (iv || bb || ld || st || br || ph) {
-                        if (inMetricsBefore) {
-                            ev.instr_before = iv; ev.bb_before = bb; ev.load_before = ld;
-                            ev.store_before = st; ev.branch_before = br; ev.phi_before = ph;
-                        } else {
-                            ev.instr_after = iv; ev.bb_after = bb; ev.load_after = ld;
-                            ev.store_after = st; ev.branch_after = br; ev.phi_after = ph;
+                    auto assignMetric = [&](const std::string &key, unsigned &field) {
+                        if (line.find("\"" + key + "\"") != std::string::npos) {
+                            int v = parseJsonInt(line, key);
+                            field = (unsigned)(v < 0 ? 0 : v);
+                        }
+                    };
+                    if (inMetricsBefore) {
+                        assignMetric("instruction_count", ev.instr_before);
+                        assignMetric("basic_block_count", ev.bb_before);
+                        assignMetric("load_count", ev.load_before);
+                        assignMetric("store_count", ev.store_before);
+                        assignMetric("branch_count", ev.branch_before);
+                        assignMetric("phi_count", ev.phi_before);
+                    } else {
+                        assignMetric("instruction_count", ev.instr_after);
+                        assignMetric("basic_block_count", ev.bb_after);
+                        assignMetric("load_count", ev.load_after);
+                        assignMetric("store_count", ev.store_after);
+                        assignMetric("branch_count", ev.branch_after);
+                        assignMetric("phi_count", ev.phi_after);
+                    }
+                }
+                {
+                    std::string t = trimWS(line);
+                    if (t == "}," || t == "}") {
+                        if (inMetricsBefore || inMetricsAfter) {
+                            inMetricsBefore = false;
+                            inMetricsAfter = false;
+                        } else if (!ev.event_type.empty()) {
+                            currEvents.push_back(ev);
+                            ev = CompareEvent();
                         }
                     }
                 }
-                if (line.find("},") != std::string::npos || line.find("}\n") != std::string::npos) {
-                    if (inMetricsBefore || inMetricsAfter) {
-                        inMetricsBefore = false;
-                        inMetricsAfter = false;
-                    } else if (!ev.event_type.empty()) {
-                        currEvents.push_back(ev);
-                        ev = CompareEvent();
+                {
+                    std::string t = trimWS(line);
+                    if ((t == "]," || t == "]") && inEvents) {
+                        if (!ev.event_type.empty()) {
+                            currEvents.push_back(ev);
+                            ev = CompareEvent();
+                        }
+                        inEvents = false;
                     }
-                }
-                if (line.find("],") != std::string::npos && inEvents) {
-                    inEvents = false;
                 }
             }
         }
@@ -360,7 +533,7 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
     std::map<std::string, PassAgg> basePasses, currPasses;
 
     for (auto &e : baseEvents) {
-        if (e.event_type == "after" && e.has_changes) {
+        if (e.event_type == "after" && (e.has_changes || e.ir_changed)) {
             auto &a = basePasses[e.pass_name];
             a.count++;
             a.instr_delta += (long long)e.instr_after - (long long)e.instr_before;
@@ -370,7 +543,7 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
         }
     }
     for (auto &e : currEvents) {
-        if (e.event_type == "after" && e.has_changes) {
+        if (e.event_type == "after" && (e.has_changes || e.ir_changed)) {
             auto &a = currPasses[e.pass_name];
             a.count++;
             a.instr_delta += (long long)e.instr_after - (long long)e.instr_before;
@@ -457,6 +630,59 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
             std::to_string(removedPasses.size()) + " pass(es) removed from current run: " + names, ""});
     }
 
+    // 4. Per-target codegen comparison. Mirrors serve_dashboard.py bands:
+    // compare optimization *reduction efficiency* per target; a >5% worse
+    // reduction is a medium regression, >20% better is an improvement.
+    // (Joined maps are also reused for the Summary printout below.)
+    std::map<std::string, CompareTarget> btMap, ctMap;
+    for (auto &t : baseTargets) btMap[t.name] = t;
+    for (auto &t : currTargets) ctMap[t.name] = t;
+    {
+        std::set<std::string> allT;
+        for (auto &kv : btMap) allT.insert(kv.first);
+        for (auto &kv : ctMap) allT.insert(kv.first);
+        for (auto &tn : allT) {
+            auto bi = btMap.find(tn);
+            auto ci = ctMap.find(tn);
+            if (bi == btMap.end()) {
+                std::string msg = "New codegen target in current run: " + tn;
+                if (!ci->second.error.empty()) msg += " (failed: " + ci->second.error + ")";
+                regressions.push_back({"info", "new_target", msg, ""});
+                continue;
+            }
+            if (ci == ctMap.end()) {
+                std::string msg = "Codegen target removed from current run: " + tn;
+                if (!bi->second.error.empty()) msg += " (baseline had failed: " + bi->second.error + ")";
+                improvements.push_back({"info", "removed_target", msg, ""});
+                continue;
+            }
+            const CompareTarget &b = bi->second, &c = ci->second;
+            if (!b.error.empty() || !c.error.empty()) {
+                std::string msg = "Target " + tn + " codegen failed";
+                if (!b.error.empty()) msg += " (baseline: " + b.error + ")";
+                if (!c.error.empty()) msg += " (current: " + c.error + ")";
+                regressions.push_back({"info", "target_error", msg, ""});
+                continue;
+            }
+            long long bRed = b.lines_before - b.lines_after;
+            long long cRed = c.lines_before - c.lines_after;
+            if (bRed > 0) {
+                long long tp = ((cRed - bRed) * 100) / bRed;
+                if (tp < -5) {
+                    regressions.push_back({"medium", "target_regression",
+                        tn + " codegen regression: " + std::to_string(-tp) +
+                        "% worse reduction than baseline (" + std::to_string(bRed) +
+                        " -> " + std::to_string(cRed) + " lines saved)", ""});
+                } else if (tp > 20) {
+                    improvements.push_back({"positive", "target_improvement",
+                        tn + " codegen improved: " + std::to_string(tp) +
+                        "% better reduction than baseline (" + std::to_string(bRed) +
+                        " -> " + std::to_string(cRed) + " lines saved)", ""});
+                }
+            }
+        }
+    }
+
     // ============================================================
     // Overall regression score (0-100)
     // ============================================================
@@ -491,9 +717,9 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
         if (s == "positive") return 0;
         return 3;
     };
-    std::sort(regressions.begin(), regressions.end(),
+    std::stable_sort(regressions.begin(), regressions.end(),
         [&](const Finding &a, const Finding &b) { return sevOrd(a.severity) < sevOrd(b.severity); });
-    std::sort(improvements.begin(), improvements.end(),
+    std::stable_sort(improvements.begin(), improvements.end(),
         [&](const Finding &a, const Finding &b) { return sevOrd(a.severity) < sevOrd(b.severity); });
 
     // ============================================================
@@ -508,7 +734,7 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
     errs() << "  Current:  " << currModule << " (" << currPipeline << ")\n";
     errs() << "\n";
 
-    errs() << "  Regression Score: " << regressionScore << "/100";
+    errs() << "  Heuristic indicator: " << regressionScore << "/100";
     if (regressionScore <= 10) errs() << "  [IMPROVED]";
     else if (regressionScore <= 30) errs() << "  [MIXED]";
     else if (regressionScore <= 60) errs() << "  [MIXED]";
@@ -526,6 +752,18 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                << " (delta: " << (redDelta >= 0 ? "+" : "") << redDelta << ")\n";
     }
     errs() << "  Codegen lines (after): " << baseCgLinesAfter << " -> " << currCgLinesAfter << "\n";
+    if (!btMap.empty() || !ctMap.empty()) {
+        errs() << "  Per-target codegen (lines after):\n";
+        std::set<std::string> allT;
+        for (auto &kv : btMap) allT.insert(kv.first);
+        for (auto &kv : ctMap) allT.insert(kv.first);
+        for (auto &tn : allT) {
+            auto bi = btMap.find(tn), ci = ctMap.find(tn);
+            std::string b = (bi == btMap.end()) ? "-" : std::to_string(bi->second.lines_after);
+            std::string c = (ci == ctMap.end()) ? "-" : std::to_string(ci->second.lines_after);
+            errs() << "    " << tn << ": " << b << " -> " << c << "\n";
+        }
+    }
     errs() << "\n";
 
     errs() << "--- Findings ---\n\n";
@@ -591,7 +829,7 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n       lpta_test --compare <base.json> <curr.json>\n";
+        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file] [--]\n       lpta_test --compare <base.json> <curr.json>\n";
         return 1;
     }
 
@@ -615,11 +853,28 @@ int main(int argc, char **argv) {
     // Parse CLI
     std::string input_file;
     bool output_dir_set = false;
+    bool end_of_flags = false;
+    auto isValidTriple = [](const std::string &t) -> bool {
+        // Real target triples only contain alnum plus - _ . (e.g.
+        // x86_64-pc-windows-msvc). Anything else is malformed or hostile
+        // (shell metacharacters) — reject early with a clear error instead
+        // of recording a confusing per-target llc failure.
+        if (t.empty()) return false;
+        for (unsigned char c : t) {
+            if (!(std::isalnum(c) || c == '-' || c == '_' || c == '.'))
+                return false;
+        }
+        return true;
+    };
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
-        if (arg == "--snapshots") {
+        if (!end_of_flags && arg == "--") {
+            end_of_flags = true;
+            continue;
+        }
+        if (!end_of_flags && arg == "--snapshots") {
             g_snapshots = true;
-        } else if (arg.rfind("--targets=", 0) == 0) {
+        } else if (!end_of_flags && arg.rfind("--targets=", 0) == 0) {
             std::string targets_arg = arg.substr(10); // skip "--targets="
             auto trimCopy = [](std::string s) -> std::string {
                 auto first = s.find_first_not_of(" \t\r\n");
@@ -646,9 +901,23 @@ int main(int argc, char **argv) {
                     return 1;
                 }
                 std::string line;
+                bool first_line = true;
                 while (std::getline(f, line)) {
+                    // Strip a UTF-8 BOM if the file starts with one so the
+                    // first triple is not silently poisoned.
+                    if (first_line) {
+                        first_line = false;
+                        const char bom[] = {'\xEF', '\xBB', '\xBF'};
+                        if (line.size() >= 3 && line.compare(0, 3, bom, 3) == 0)
+                            line.erase(0, 3);
+                    }
                     line = trimCopy(line);
                     if (!line.empty() && line[0] != '#') {
+                        if (!isValidTriple(line)) {
+                            errs() << "ERROR: invalid target triple '" << line
+                                   << "' (allowed: letters, digits, '-', '_', '.')\n";
+                            return 1;
+                        }
                         g_target_triples.push_back(line);
                     }
                 }
@@ -662,6 +931,11 @@ int main(int argc, char **argv) {
                     if (item == "common") {
                         for (auto &t : COMMON_TARGETS) g_target_triples.push_back(t);
                     } else {
+                        if (!isValidTriple(item)) {
+                            errs() << "ERROR: invalid target triple '" << item
+                                   << "' (allowed: letters, digits, '-', '_', '.')\n";
+                            return 1;
+                        }
                         g_target_triples.push_back(item);
                     }
                 }
@@ -680,21 +954,21 @@ int main(int argc, char **argv) {
                 errs() << "ERROR: --targets produced no valid targets\n";
                 return 1;
             }
-        } else if (arg == "-O0" || arg == "--O0") {
+        } else if (!end_of_flags && (arg == "-O0" || arg == "--O0")) {
             g_opt = OptimizationLevel::O0; g_opt_level = "O0";
-        } else if (arg == "-O1" || arg == "--O1") {
+        } else if (!end_of_flags && (arg == "-O1" || arg == "--O1")) {
             g_opt = OptimizationLevel::O1; g_opt_level = "O1";
-        } else if (arg == "-O2" || arg == "--O2") {
+        } else if (!end_of_flags && (arg == "-O2" || arg == "--O2")) {
             g_opt = OptimizationLevel::O2; g_opt_level = "O2";
-        } else if (arg == "-O3" || arg == "--O3") {
+        } else if (!end_of_flags && (arg == "-O3" || arg == "--O3")) {
             g_opt = OptimizationLevel::O3; g_opt_level = "O3";
-        } else if (arg == "-Os" || arg == "--Os") {
+        } else if (!end_of_flags && (arg == "-Os" || arg == "--Os")) {
             g_opt = OptimizationLevel::Os; g_opt_level = "Os";
-        } else if (arg == "-Oz" || arg == "--Oz") {
+        } else if (!end_of_flags && (arg == "-Oz" || arg == "--Oz")) {
             g_opt = OptimizationLevel::Oz; g_opt_level = "Oz";
-        } else if (!arg.empty() && arg[0] == '-') {
+        } else if (!end_of_flags && !arg.empty() && arg[0] == '-') {
             errs() << "ERROR: unknown option '" << arg << "'\n";
-            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n       lpta_test --compare <base.json> <curr.json>\n";
+            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file] [--]\n       lpta_test --compare <base.json> <curr.json>\n";
             return 1;
         } else if (input_file.empty()) {
             input_file = arg;
@@ -703,13 +977,13 @@ int main(int argc, char **argv) {
             output_dir_set = true;
         } else {
             errs() << "ERROR: unexpected argument '" << arg << "'\n";
-            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n       lpta_test --compare <base.json> <curr.json>\n";
+            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file] [--]\n       lpta_test --compare <base.json> <curr.json>\n";
             return 1;
         }
     }
 
     if (input_file.empty()) {
-        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]\n       lpta_test --compare <base.json> <curr.json>\n";
+        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file] [--]\n       lpta_test --compare <base.json> <curr.json>\n";
         return 1;
     }
 
@@ -733,11 +1007,29 @@ int main(int argc, char **argv) {
         } else {
             M = parseIRFile(input_file, Err, Context);
             if (!M) {
-                // Check whitespace-only file (e.g. "\n  \n") -> treat as empty
-                std::ifstream cf(input_file);
-                std::string content((std::istreambuf_iterator<char>(cf)), std::istreambuf_iterator<char>());
-                bool all_ws = !content.empty() && std::all_of(content.begin(), content.end(),
-                    [](unsigned char c){ return std::isspace(c); });
+                // Check whitespace-only file (e.g. "\n  \n") -> treat as empty.
+                // Reads in bounded chunks so a huge whitespace file cannot
+                // exhaust RAM by slurping it whole.
+                std::ifstream cf(input_file, std::ios::binary);
+                bool all_ws = false;
+                if (cf) {
+                    all_ws = true;
+                    bool any = false;
+                    char buf[8192];
+                    while (cf && all_ws) {
+                        cf.read(buf, sizeof(buf));
+                        std::streamsize n = cf.gcount();
+                        if (n == 0) break;
+                        any = true;
+                        for (std::streamsize k = 0; k < n; ++k) {
+                            if (!std::isspace(static_cast<unsigned char>(buf[k]))) {
+                                all_ws = false;
+                                break;
+                            }
+                        }
+                    }
+                    all_ws = all_ws && any;
+                }
                 if (all_ws) {
                     M = std::make_unique<Module>(input_file, Context);
                 } else {
@@ -800,14 +1092,21 @@ int main(int argc, char **argv) {
             frame.before = det.metrics;
             frame.invalidated = false;
             frame.event_id = current_event_id;
+            // IR-change hash: serialize once per pass; reuse the text for the
+            // snapshot when this pass is allowlisted so hashing costs no
+            // extra serialization there.
+            std::string snap = serializeIR(IR);
+            frame.before_hash = hashIRText(snap);
             // Only capture IR text if snapshots enabled for this pass.
-            // Cap at 4 MB per snapshot to avoid unbounded memory growth
-            // on large modules.
+            // Cap at kMaxSnapshotBytes per snapshot to avoid unbounded memory
+            // growth on large modules. If BEFORE exceeds the cap we record
+            // ir_before_dropped so AFTER drops the pair atomically (never
+            // emit after-without-before).
             if (shouldSnapshot(PassID)) {
-                std::string snap = serializeIR(IR);
-                static constexpr size_t kMaxSnapshotBytes = 4 * 1024 * 1024;
                 if (snap.size() <= kMaxSnapshotBytes)
                     frame.ir_before = std::move(snap);
+                else
+                    frame.ir_before_dropped = true;
             }
             unsigned frame_depth = frame.depth;
             bool before_kept = !frame.ir_before.empty();
@@ -856,6 +1155,11 @@ int main(int argc, char **argv) {
                 if (it == pass_stack.rend()) {
                     it = std::find_if(pass_stack.rbegin(), pass_stack.rend(),
                         [&](const PassFrame &f) { return f.pass_name == PassID.str(); });
+                    if (it != pass_stack.rend()) {
+                        errs() << "  WARNING: AFTER '" << PassID
+                               << "': exact IR-unit match missed; fell back to name-only match"
+                               << " (possible sibling-unit mispair)\n";
+                    }
                 }
             } else {
                 // Unknown — pointer is null, match by kind/name first
@@ -886,6 +1190,14 @@ int main(int argc, char **argv) {
 
             IRDetection det = detEarly;
             bool changes = hasAnyDelta(frame.before, det.metrics);
+            // Real IR change: hash differs. Catches mutations invisible to
+            // counters (operand/constant/attribute edits). Both-zero means
+            // unhashable (Unknown unit) — never report a change there.
+            uint64_t after_hash = hashIRUnit(IR);
+            bool ir_changed = (after_hash != frame.before_hash);
+            // Snapshots/diffs key off either signal: a pass that rewrote IR
+            // without moving counters still deserves its before/after text.
+            bool changed_any = changes || ir_changed;
 
             // Record event (using same ID as BEFORE)
             Event ev;
@@ -899,17 +1211,19 @@ int main(int argc, char **argv) {
             ev.metrics_before = frame.before;
             ev.metrics_after = det.metrics;
             ev.has_changes = changes;
+            ev.ir_changed = ir_changed;
             ev.ir_before = std::move(frame.ir_before);
+            bool before_dropped = frame.ir_before_dropped;
             // Snapshot size cap is decided jointly for the pair: keep
             // before/after only if BOTH sides fit under the cap, so the
             // dashboard never renders a one-sided diff. Also clean orphaned before file.
             bool both_fit = true;
             {
-                static constexpr size_t kMaxSnapshotBytes = 4 * 1024 * 1024;
                 std::string afterSnap;
-                if (changes && shouldSnapshot(PassID))
+                if (changed_any && shouldSnapshot(PassID))
                     afterSnap = serializeIR(IR);
-                both_fit = ev.ir_before.size() <= kMaxSnapshotBytes &&
+                both_fit = !before_dropped &&
+                           ev.ir_before.size() <= kMaxSnapshotBytes &&
                            afterSnap.size() <= kMaxSnapshotBytes;
                 if (!both_fit) {
                     ev.ir_before.clear();
@@ -946,12 +1260,25 @@ int main(int argc, char **argv) {
                 printDeltaLine("stores", det.metrics.store_count, frame.before.store_count);
                 printDeltaLine("branches", det.metrics.branch_count, frame.before.branch_count);
                 printDeltaLine("phis", det.metrics.phi_count, frame.before.phi_count);
+                printDeltaLine("returns", det.metrics.return_count, frame.before.return_count);
+                printDeltaLine("op_arith", det.metrics.op_arith, frame.before.op_arith);
+                printDeltaLine("op_cmp", det.metrics.op_cmp, frame.before.op_cmp);
+                printDeltaLine("op_memory", det.metrics.op_memory, frame.before.op_memory);
+                printDeltaLine("op_control", det.metrics.op_control, frame.before.op_control);
+                printDeltaLine("op_cast", det.metrics.op_cast, frame.before.op_cast);
+                printDeltaLine("op_call", det.metrics.op_call, frame.before.op_call);
+                printDeltaLine("op_vector", det.metrics.op_vector, frame.before.op_vector);
+                printDeltaLine("op_other", det.metrics.op_other, frame.before.op_other);
+                if (ir_changed && !changes)
+                    errs() << "      (IR text changed; all counters equal)\n";
+            } else if (ir_changed) {
+                errs() << "  (IR changed, metrics unchanged)\n";
             } else {
                 errs() << "  (no change)\n";
             }
 
             // IR snapshot (after) — gated by same joint cap as JSON
-            if (shouldSnapshot(PassID) && changes && both_fit)
+            if (shouldSnapshot(PassID) && changed_any && both_fit)
                 saveIRSnapshot("after", IR, PassID.str(), current_event_id);
         });
 

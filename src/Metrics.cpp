@@ -8,6 +8,99 @@
 
 using namespace llvm;
 
+// Opcode-group histogram: maps every opcode into exactly one group so the
+// groups partition instruction_count (used as "what changed" evidence).
+static void countOpcodeGroup(IRMetrics &m, unsigned opcode) {
+    switch (opcode) {
+    case Instruction::Ret:
+    case Instruction::Br:
+    case Instruction::Switch:
+    case Instruction::IndirectBr:
+    case Instruction::Resume:
+    case Instruction::Unreachable:
+    case Instruction::CleanupRet:
+    case Instruction::CatchRet:
+    case Instruction::CatchSwitch:
+        m.op_control++;
+        break;
+    case Instruction::Call:
+    case Instruction::Invoke:
+    case Instruction::CallBr:
+        m.op_call++;
+        break;
+    case Instruction::PHI:
+    case Instruction::Select:
+    case Instruction::ICmp:
+    case Instruction::FCmp:
+        m.op_cmp++;
+        break;
+    case Instruction::Alloca:
+    case Instruction::Load:
+    case Instruction::Store:
+    case Instruction::GetElementPtr:
+    case Instruction::Fence:
+    case Instruction::AtomicCmpXchg:
+    case Instruction::AtomicRMW:
+        m.op_memory++;
+        break;
+    case Instruction::Trunc:
+    case Instruction::ZExt:
+    case Instruction::SExt:
+    case Instruction::FPToUI:
+    case Instruction::FPToSI:
+    case Instruction::UIToFP:
+    case Instruction::SIToFP:
+    case Instruction::FPTrunc:
+    case Instruction::FPExt:
+    case Instruction::PtrToInt:
+    case Instruction::IntToPtr:
+    case Instruction::BitCast:
+    case Instruction::AddrSpaceCast:
+        m.op_cast++;
+        break;
+    case Instruction::ExtractElement:
+    case Instruction::InsertElement:
+    case Instruction::ShuffleVector:
+    case Instruction::ExtractValue:
+    case Instruction::InsertValue:
+        m.op_vector++;
+        break;
+    case Instruction::Add:
+    case Instruction::FAdd:
+    case Instruction::Sub:
+    case Instruction::FSub:
+    case Instruction::Mul:
+    case Instruction::FMul:
+    case Instruction::UDiv:
+    case Instruction::SDiv:
+    case Instruction::FDiv:
+    case Instruction::URem:
+    case Instruction::SRem:
+    case Instruction::FRem:
+    case Instruction::Shl:
+    case Instruction::LShr:
+    case Instruction::AShr:
+    case Instruction::And:
+    case Instruction::Or:
+    case Instruction::Xor:
+    case Instruction::FNeg:
+        m.op_arith++;
+        break;
+    default:
+        // LandingPad, Freeze, VAArg, funclet pads, and any future opcode.
+        m.op_other++;
+        break;
+    }
+}
+
+// Partition invariant shared by all three capture functions.
+static void assertPartition(const IRMetrics &m) {
+    assert(m.op_arith + m.op_cmp + m.op_memory + m.op_control +
+           m.op_cast + m.op_call + m.op_vector + m.op_other ==
+           m.instruction_count &&
+           "opcode groups must partition instruction_count");
+}
+
 // Formal verification: captureModuleMetrics counts all IR elements in a module.
 // Postcondition: instruction_count >= call_count + load_count + store_count
 //                (every call/load/store is an instruction)
@@ -22,6 +115,7 @@ IRMetrics captureModuleMetrics(const Module &M) {
             m.basic_block_count++;
             for (auto &I : BB) {
                 m.instruction_count++;
+                countOpcodeGroup(m, I.getOpcode());
                 switch (I.getOpcode()) {
                 case Instruction::Call:
                 case Instruction::Invoke:
@@ -47,6 +141,7 @@ IRMetrics captureModuleMetrics(const Module &M) {
            "call/load/store counts must be <= instruction count");
     assert(m.basic_block_count >= m.return_count &&
            "return count must be <= basic block count");
+    assertPartition(m);
     return m;
 }
 
@@ -57,6 +152,7 @@ IRMetrics captureFunctionMetrics(const Function &F) {
         m.basic_block_count++;
         for (auto &I : BB) {
             m.instruction_count++;
+            countOpcodeGroup(m, I.getOpcode());
             switch (I.getOpcode()) {
             case Instruction::Call:
             case Instruction::Invoke:
@@ -78,6 +174,7 @@ IRMetrics captureFunctionMetrics(const Function &F) {
            "call/load/store counts must be <= instruction count");
     assert(m.basic_block_count >= m.return_count &&
            "return count must be <= basic block count");
+    assertPartition(m);
     return m;
 }
 
@@ -87,6 +184,7 @@ IRMetrics captureLoopMetrics(const Loop &L) {
         m.basic_block_count++;
         for (auto &I : *BB) {
             m.instruction_count++;
+            countOpcodeGroup(m, I.getOpcode());
             switch (I.getOpcode()) {
             case Instruction::Call:
             case Instruction::Invoke:
@@ -108,6 +206,7 @@ IRMetrics captureLoopMetrics(const Loop &L) {
            "call/load/store counts must be <= instruction count");
     assert(m.basic_block_count >= m.return_count &&
            "return count must be <= basic block count");
+    assertPartition(m);
     return m;
 }
 
@@ -125,5 +224,13 @@ bool hasAnyDelta(const IRMetrics &a, const IRMetrics &b) {
            a.store_count != b.store_count ||
            a.branch_count != b.branch_count ||
            a.phi_count != b.phi_count ||
-           a.return_count != b.return_count;
+           a.return_count != b.return_count ||
+           a.op_arith != b.op_arith ||
+           a.op_cmp != b.op_cmp ||
+           a.op_memory != b.op_memory ||
+           a.op_control != b.op_control ||
+           a.op_cast != b.op_cast ||
+           a.op_call != b.op_call ||
+           a.op_vector != b.op_vector ||
+           a.op_other != b.op_other;
 }

@@ -454,7 +454,7 @@ canvas.sparkline{width:100%;height:80px;display:block}
   </div>
   <!-- PASSES -->
   <div class="page" id="page-passes">
-    <div class="page-header reveal"><h2>Pass Explorer</h2><p>Browse every pass execution with filters, search, and IR diff inspection</p></div>
+    <div class="page-header reveal"><h2>Pass Explorer</h2><p>Browse every pass execution with filters, search, and IR diff inspection. "Changed" means metrics moved or IR text changed; CGSCC-level passes show as <em>Unknown</em> units with zero metrics (see README: Supported IR granularities).</p></div>
     <div class="top-grid reveal" id="top-passes-grid"></div>
     <div class="pass-controls reveal">
       <button class="filter-btn active" data-filter="all">All</button>
@@ -657,7 +657,7 @@ function renderOverview(){
 }
 
 function renderTopPassesCompact(){
-  if(!D)return;const ch=D.events.filter(e=>e.event_type==='after'&&e.has_changes);
+  if(!D)return;const ch=D.events.filter(e=>e.event_type==='after'&&(e.has_changes||e.ir_changed));
   const bp={};for(const e of ch){const k=e.pass_name;if(!bp[k])bp[k]={name:k,iD:0,count:0};bp[k].iD+=e.metrics_after.instruction_count-e.metrics_before.instruction_count;bp[k].count++}
   const sorted=Object.values(bp).sort((a,b)=>a.iD-b.iD).slice(0,6);
   if(!sorted.length){document.getElementById('overview-top-passes').innerHTML='';return}
@@ -766,7 +766,7 @@ function renderOverviewCharts(){
 function renderFunctions(){
   if(!D)return;const fm={};
   for(const e of D.events){
-    if(e.ir_kind!=='Function'||e.event_type!=='after'||!e.has_changes)continue;
+    if(e.ir_kind!=='Function'||e.event_type!=='after'||!(e.has_changes||e.ir_changed))continue;
     const n=e.ir_name;
     if(!fm[n])fm[n]={before:e.metrics_before.instruction_count,after:e.metrics_after.instruction_count,passes:0,bbs_before:e.metrics_before.basic_block_count,bbs_after:e.metrics_after.basic_block_count};
     fm[n].after=e.metrics_after.instruction_count;fm[n].bbs_after=e.metrics_after.basic_block_count;fm[n].passes++;
@@ -808,21 +808,21 @@ function openFuncDetail(funcName){
     return `<div class="func-pass-item" data-idx="${i}" onclick="selectFuncPass(${i})">
       <div class="fp-name">${esc(e.pass_name)}</div>
       <div class="fp-delta ${cls}">${delta>0?'+':''}${delta} instr · cum: ${cumInstr}</div>
-      <div class="fp-ir">${e.has_changes?(e.ir_before?'has IR diff':'changed · no snapshot'):e.event_type==='invalidated'?'invalidated':'no change'}</div>
+      <div class="fp-ir">${e.has_changes?(e.ir_before?'has IR diff':'changed · no snapshot'):e.ir_changed?(e.ir_before?'IR diff (counters equal)':'IR modified · no snapshot'):e.event_type==='invalidated'?'invalidated':'no change'}</div>
     </div>`;
   });
   document.getElementById('func-pass-list').innerHTML=passItems.join('');
 
   // Chart: instruction count over passes
-  const chartData=passEvents.map((e,i)=>({i,name:e.pass_name,before:e.metrics_before.instruction_count,after:e.metrics_after.instruction_count,delta:e.metrics_after.instruction_count-e.metrics_before.instruction_count,hasChanges:e.has_changes}));
+  const chartData=passEvents.map((e,i)=>({i,name:e.pass_name,before:e.metrics_before.instruction_count,after:e.metrics_after.instruction_count,delta:e.metrics_after.instruction_count-e.metrics_before.instruction_count,hasChanges:(e.has_changes||e.ir_changed)}));
   FUNC_CHART_DATA=chartData;
   // Open the modal BEFORE drawing: the canvas measures zero while display:none
   document.getElementById('func-modal-bg').classList.add('open');
   requestAnimationFrame(()=>drawFuncChart(chartData));
   // Show first changed pass diff
-  const firstChanged=passEvents.findIndex(e=>e.has_changes&&e.ir_before);
+  const firstChanged=passEvents.findIndex(e=>(e.has_changes||e.ir_changed)&&e.ir_before);
   if(firstChanged>=0)selectFuncPass(firstChanged);
-  else document.getElementById('func-diff-area').innerHTML='<div style="padding:40px;text-align:center;color:var(--text-muted);white-space:pre-line">'+(passEvents.some(e=>e.has_changes)
+  else document.getElementById('func-diff-area').innerHTML='<div style="padding:40px;text-align:center;color:var(--text-muted);white-space:pre-line">'+(passEvents.some(e=>e.has_changes||e.ir_changed)
     ?'No IR snapshots in this report.\nRe-run with --snapshots to unlock IR diffs:\n  lpta_test input.ll report -O2 --snapshots'
     :'No IR diffs available for this function')+'</div>';
 }
@@ -883,8 +883,8 @@ function selectFuncPass(idx){
   const passEvents=D.events.filter(e=>e.ir_kind==='Function'&&e.ir_name===funcName&&e.event_type==='after');
   const e=passEvents[idx];
   if(!e||!e.ir_before){
-    const why=(e&&e.has_changes)
-      ?'This pass changed the IR, but no snapshot was captured for it.\nSnapshots require: lpta_test input.ll report -O2 --snapshots\n(and only the 12 high-impact allowlisted passes are captured).'
+    const why=(e&&(e.has_changes||e.ir_changed))
+      ?'This pass changed the IR, but no snapshot was captured for it.\nSnapshots require: lpta_test input.ll report -O2 --snapshots\n(and only the 30 allowlisted passes are captured).'
       :'No IR diff for this pass';
     document.getElementById('func-diff-area').innerHTML='<div style="padding:30px;text-align:center;color:var(--text-muted);white-space:pre-line">'+why+'</div>';return}
 
@@ -909,7 +909,7 @@ document.getElementById('func-modal-bg').addEventListener('click',function(e){if
 // ===== PASSES =====
 function renderPasses(){if(!D)return;renderTopPasses();renderEvents()}
 function renderTopPasses(){
-  if(!D)return;const ch=D.events.filter(e=>e.event_type==='after'&&e.has_changes);
+  if(!D)return;const ch=D.events.filter(e=>e.event_type==='after'&&(e.has_changes||e.ir_changed));
   const bp={};for(const e of ch){const k=e.pass_name;if(!bp[k])bp[k]={name:k,iD:0,bD:0,count:0};bp[k].iD+=e.metrics_after.instruction_count-e.metrics_before.instruction_count;bp[k].bD+=e.metrics_after.basic_block_count-e.metrics_before.basic_block_count;bp[k].count++}
   const sorted=Object.values(bp).sort((a,b)=>a.iD-b.iD);
   document.getElementById('top-passes-grid').innerHTML=sorted.map(p=>{const cls=p.iD<0?'neg':p.iD>0?'pos':'zero';return `<div class="top-card"><div><div class="tp-name">${esc(p.name)}</div><div class="tp-count">${p.count}×</div></div><div style="text-align:right"><div class="tp-delta ${cls}">${p.iD>0?'+':''}${p.iD}</div><div class="tp-sub">${p.bD>0?'+':''}${p.bD} BBs</div></div></div>`}).join('');
@@ -917,7 +917,7 @@ function renderTopPasses(){
 function renderEvents(){
   if(!D)return;const q=document.getElementById('search').value.toLowerCase();
   const evts=D.events.filter(e=>{
-    if(F==='changed'&&e.event_type==='after'&&!e.has_changes)return false;
+    if(F==='changed'&&e.event_type==='after'&&!(e.has_changes||e.ir_changed))return false;
     if(F==='Module'&&e.ir_kind!=='Module')return false;
     if(F==='Function'&&e.ir_kind!=='Function')return false;
     if(F==='Loop'&&e.ir_kind!=='Loop')return false;
@@ -927,13 +927,14 @@ function renderEvents(){
     return true;
   });
   const html=evts.map(e=>{
-    const rc=e.event_type==='after'&&e.has_changes?'changed':e.event_type==='invalidated'?'invalidated':'';
+    const rc=e.event_type==='after'&&(e.has_changes||e.ir_changed)?'changed':e.event_type==='invalidated'?'invalidated':'';
     const bc=e.event_type==='before'?'bef':e.event_type==='after'?'aft':'inv';
     const nest='&nbsp;'.repeat(e.depth*2);
-    const canView=e.event_type==='after'&&e.has_changes&&e.ir_before;
+    const canView=e.event_type==='after'&&(e.has_changes||e.ir_changed)&&e.ir_before;
     let d='';
     if(e.event_type==='after'){
-      if(e.has_changes){const p=[];const ms=['instruction_count','basic_block_count','branch_count','phi_count','call_count','load_count','store_count'];const ls=['instr','BB','br','phi','call','ld','st'];for(let j=0;j<ms.length;j++){const v=e.metrics_after[ms[j]]-e.metrics_before[ms[j]];if(v!==0)p.push(`<span class="${v<0?'neg':'pos'}">${ls[j]}${v>0?'+':''}${v}</span>`)}d=p.join(' ')}
+      if(e.has_changes){const p=[];const ms=['instruction_count','basic_block_count','branch_count','phi_count','call_count','load_count','store_count'];const ls=['instr','BB','br','phi','call','ld','st'];for(let j=0;j<ms.length;j++){const v=e.metrics_after[ms[j]]-e.metrics_before[ms[j]];if(v!==0)p.push(`<span class="${v<0?'neg':'pos'}">${ls[j]}${v>0?'+':''}${v}</span>`)}if(e.ir_changed&&!p.length)p.push('<span class="pos">IR modified</span>');d=p.join(' ')}
+      else if(e.ir_changed)d='<span class="pos">IR modified · counters equal</span>';
       else d='<span class="nc">—</span>';
     }else if(e.event_type==='invalidated')d='<span class="nc">invalidated</span>';
     return `<div class="ev ${rc}" ${canView?`onclick="openDiff(${e.id})"`:''}><span class="eid">${e.id}</span><span><span class="badge ${bc}">${e.event_type.slice(0,3)}</span></span><span class="pname"><span class="t-${e.pass_type}">${nest}${esc(e.pass_name)}</span></span><span class="iru">${e.ir_kind} ${esc(e.ir_name)}</span><span class="dep">${e.depth}</span><span class="dlt">${d}</span><span>${canView?`<button class="view-btn" title="View IR diff">⊕</button> <button class="ai-explain-btn" title="Ask AI about this change" onclick="explainEvent(event,${e.id})">✨</button>`:''}</span></div>`;
@@ -971,7 +972,7 @@ function renderPipelineCharts(){
   let html=`<div class="ov-chart reveal"><div class="ch-head"><h4>Pass Type Over Time</h4><span class="hint">Stacked by type</span></div><div class="ch-body"><canvas class="sparkline" id="spark-type-time" style="height:120px"></canvas></div></div>`;
   // Efficiency gauge
   const total=beforeEvents.length;
-  const changed=D.events.filter(e=>e.event_type==='after'&&e.has_changes).length;
+  const changed=D.events.filter(e=>e.event_type==='after'&&(e.has_changes||e.ir_changed)).length;
   const eff=total?Math.round(changed/total*100):0;
   html+=`<div class="ov-chart reveal"><div class="ch-head"><h4>Pipeline Efficiency</h4><span class="hint">${changed}/${total} passes changed IR</span></div><div class="ch-body" style="display:flex;align-items:center;justify-content:center;height:120px"><canvas id="spark-gauge" width="200" height="120"></canvas></div></div>`;
   document.getElementById('pipeline-charts').innerHTML=html;
@@ -1065,10 +1066,10 @@ function renderChart(){
   for(let i=0;i<n;i++){const e=evts[i];if(e.event_type!=='after')continue;const k=e.pass_name+':'+e.depth;if(!afterQueues.has(k))afterQueues.set(k,[]);afterQueues.get(k).push(i)}
   for(let i=0;i<n;i++){const e=evts[i];if(e.event_type!=='before')continue;const x=pad.l+i*xStep;const y=pad.t+(e.depth/maxDepth)*plotH;
     const k=e.pass_name+':'+e.depth;const q=afterQueues.get(k);
-    if(q&&q.length){const j=q.shift();const x2=pad.l+j*xStep;const ae=evts[j];ctx.strokeStyle=ae.has_changes?'rgba(52,211,153,.12)':'rgba(99,102,241,.06)';ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x2,y);ctx.stroke()}}
+    if(q&&q.length){const j=q.shift();const x2=pad.l+j*xStep;const ae=evts[j];ctx.strokeStyle=(ae.has_changes||ae.ir_changed)?'rgba(52,211,153,.12)':'rgba(99,102,241,.06)';ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x2,y);ctx.stroke()}}
 
   for(let i=0;i<n;i++){const e=evts[i];const x=pad.l+i*xStep;const y=pad.t+(e.depth/maxDepth)*plotH;let color,r;
-    if(e.event_type==='after'&&e.has_changes){color='#34d399';r=2.5}else if(e.event_type==='invalidated'){color='#f87171';r=2.5}else if(e.event_type==='before'){color='rgba(99,102,241,.3)';r=1.5}else{color='rgba(99,102,241,.15)';r=1}
+    if(e.event_type==='after'&&(e.has_changes||e.ir_changed)){color='#34d399';r=2.5}else if(e.event_type==='invalidated'){color='#f87171';r=2.5}else if(e.event_type==='before'){color='rgba(99,102,241,.3)';r=1.5}else{color='rgba(99,102,241,.15)';r=1}
     ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill()}
   attachChartTooltip();
 }
@@ -1084,7 +1085,9 @@ function openDiff(eid){
   document.getElementById('ir-before').innerHTML=render(bL,aS,false);
   document.getElementById('ir-after').innerHTML=render(aL,bS,true);
   const ms=[['instruction_count','Instructions'],['basic_block_count','BBs'],['branch_count','Branches'],['phi_count','PHIs'],['call_count','Calls'],['load_count','Loads'],['store_count','Stores']];
-  document.getElementById('modal-footer').innerHTML=ms.map(([k,l])=>{const d=e.metrics_after[k]-e.metrics_before[k];const cls=d<0?'neg':d>0?'pos':'';return `<div class="m"><span class="ml">${l}:</span><span class="mv">${e.metrics_before[k]} → ${e.metrics_after[k]}</span><span class="md ${cls}">${d>0?'+':''}${d}</span></div>`}).join('')
+  const gs=[['op_arith','arith'],['op_cmp','cmp/sel/phi'],['op_memory','mem'],['op_control','ctrl'],['op_cast','cast'],['op_call','call'],['op_vector','vec'],['op_other','other']];
+  const ghtml=gs.map(([k,l])=>{const d=(e.metrics_after[k]||0)-(e.metrics_before[k]||0);if(!d)return '';const cls=d<0?'neg':d>0?'pos':'';return `<div class="m"><span class="ml">${l}:</span><span class="mv">${e.metrics_before[k]||0}→${e.metrics_after[k]||0}</span><span class="md ${cls}">${d>0?'+':''}${d}</span></div>`}).join('');
+  document.getElementById('modal-footer').innerHTML=ms.map(([k,l])=>{const d=(e.metrics_after[k]||0)-(e.metrics_before[k]||0);const cls=d<0?'neg':d>0?'pos':'';return `<div class="m"><span class="ml">${l}:</span><span class="mv">${e.metrics_before[k]||0} → ${e.metrics_after[k]||0}</span><span class="md ${cls}">${d>0?'+':''}${d}</span></div>`}).join('')+ghtml
     +'<button class="ai-explain-btn" onclick="explainCurrentDiff()">✨ Explain this change</button>';
   document.getElementById('modal-bg').classList.add('open');
 }
@@ -1099,10 +1102,10 @@ function exportJSON(){
 function exportCSV(){
   if(!D)return;
   function csvQ(s){return '"'+s.replace(/"/g,'""')+'"'}
-  let csv='id,event_type,pass_name,pass_type,ir_kind,ir_name,depth,has_changes,instr_before,instr_after,instr_delta\n';
+  let csv='id,event_type,pass_name,pass_type,ir_kind,ir_name,depth,has_changes,ir_changed,instr_before,instr_after,instr_delta\n';
   D.events.filter(e=>e.event_type==='after').forEach(e=>{
     const ib=e.metrics_before?.instruction_count||0,ia=e.metrics_after?.instruction_count||0;
-    csv+=`${e.id},${e.event_type},${csvQ(e.pass_name)},${e.pass_type},${e.ir_kind},${csvQ(e.ir_name)},${e.depth},${e.has_changes},${ib},${ia},${ia-ib}\n`;
+    csv+=`${e.id},${e.event_type},${csvQ(e.pass_name)},${e.pass_type},${e.ir_kind},${csvQ(e.ir_name)},${e.depth},${e.has_changes},${!!e.ir_changed},${ib},${ia},${ia-ib}\n`;
   });
   const blob=new Blob([csv],{type:'text/csv'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`lpta-${D.pipeline}-events.csv`;a.click();
@@ -1143,7 +1146,7 @@ function attachChartTooltip(){
     if(idx<0||idx>=n){tooltip.style.display='none';return}
     const e=evts[idx];if(Math.abs((pad.left+idx*xStep)-mx)>15){tooltip.style.display='none';return}
     let html=`<div class="tt-name">${esc(e.pass_name)}</div><div class="tt-ir">${e.ir_kind} ${esc(e.ir_name)} \u00b7 depth ${e.depth}</div>`;
-    if(e.event_type==='after'&&e.has_changes){const d=e.metrics_after.instruction_count-e.metrics_before.instruction_count;html+=`<div class="tt-delta">${d>0?'+':''}${d} instructions</div>`}
+    if(e.event_type==='after'&&(e.has_changes||e.ir_changed)){const d=e.metrics_after.instruction_count-e.metrics_before.instruction_count;html+=`<div class="tt-delta">${d>0?'+':''}${d} instructions${e.ir_changed&&!e.has_changes?' · IR modified':''}</div>`}
     tooltip.innerHTML=html;tooltip.style.display='block';tooltip.style.left=Math.min(mx+14,W-210)+'px';tooltip.style.top=(my-12)+'px';
   },{signal});
   canvas.addEventListener('mouseleave',()=>{tooltip.style.display='none'},{signal});
@@ -1228,7 +1231,7 @@ function mdToHtml(src){
   const closeLists=()=>{if(inUl){html+='</ul>';inUl=false}if(inOl){html+='</ol>';inOl=false}};
   const inline=t=>t
     .replace(/`([^`]+)`/g,'<code>$1</code>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener" style="color:var(--accent-light);text-decoration:underline">$1</a>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g,(m,t,u)=>/^https?:\/\//i.test(u)?'<a href="'+u+'" target="_blank" rel="noopener" style="color:var(--accent-light);text-decoration:underline">'+t+'</a>':t)
     .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
     .replace(/(^|[\s(])\*([^*\n]+)\*/g,'$1<em>$2</em>');
   for(const raw of lines){
@@ -1410,7 +1413,7 @@ function buildAIContext(){
 
   const bp={};
   for(const e of D.events){
-    if(e.event_type!=='after'||!e.has_changes)continue;
+    if(e.event_type!=='after'||!(e.has_changes||e.ir_changed))continue;
     const k=e.pass_name;
     if(!bp[k])bp[k]={iD:0,bD:0,count:0,cat:passCategory(k)};
     bp[k].iD+=((e.metrics_after.instruction_count||0)-(e.metrics_before.instruction_count||0));
@@ -1423,7 +1426,7 @@ function buildAIContext(){
 
   const fm={};
   for(const e of D.events){
-    if(e.ir_kind!=='Function'||e.event_type!=='after'||!e.has_changes)continue;
+    if(e.ir_kind!=='Function'||e.event_type!=='after'||!(e.has_changes||e.ir_changed))continue;
     const n=e.ir_name;
     if(!fm[n])fm[n]={first:(e.metrics_before.instruction_count||0),last:(e.metrics_after.instruction_count||0),passes:0};
     fm[n].last=(e.metrics_after.instruction_count||0);fm[n].passes++;
@@ -1436,8 +1439,8 @@ function buildAIContext(){
   L.push('\n--- PASS EXECUTION SEQUENCE (changing passes only) ---');
   let seqCount=0;
   for(const e of D.events){
-    if(e.event_type==='after' && e.has_changes){
-      if(seqCount>=50){L.push(`  ... (${D.events.filter(x=>x.event_type==='after'&&x.has_changes).length - seqCount} more passes not shown)`);break;}
+    if(e.event_type==='after' && (e.has_changes||e.ir_changed)){
+       if(seqCount>=50){L.push(`  ... (${D.events.filter(x=>x.event_type==='after'&&(x.has_changes||x.ir_changed)).length - seqCount} more passes not shown)`);break;}
       const d=e.metrics_after.instruction_count - e.metrics_before.instruction_count;
       L.push(`  [${e.id}] ${e.pass_name} @ ${e.ir_kind} ${e.ir_name} (depth=${e.depth}): instr ${d>0?'+':''}${d}, BB ${(e.metrics_after.basic_block_count - e.metrics_before.basic_block_count)>0?'+':''}${e.metrics_after.basic_block_count - e.metrics_before.basic_block_count}, snapshot=${e.ir_before?'yes':'no'}`);
       seqCount++;
@@ -1560,7 +1563,7 @@ Use exact numbers from the report.`,buildAIContext());
   }else if(kind==='top'){
     let best=null;
     for(const e of D.events){
-      if(e.event_type!=='after'||!e.has_changes)continue;
+      if(e.event_type!=='after'||!(e.has_changes||e.ir_changed))continue;
       const d=e.metrics_after.instruction_count-e.metrics_before.instruction_count;
       if(!best||d<best.d)best={d,e};
     }
@@ -1679,7 +1682,10 @@ async function runCompare(){
     renderCompareResults(cmp);
     document.getElementById('compare-export-btn').style.display='';
   }catch(err){
-    results.innerHTML='<div class="compare-empty" style="color:var(--red)">Error: '+err.message+'</div>';
+    const noBackend=err instanceof TypeError;
+    results.innerHTML='<div class="compare-empty" style="color:var(--red)">Error: '+(noBackend
+      ?'Compare backend not reachable. Serve this report with <code>python serve_dashboard.py</code> instead of plain <code>http.server</code>, or run <code>lpta_test --compare base.json curr.json</code>.'
+      :err.message)+'</div>';
   }
   btn.disabled=false;
   btn.textContent='Run Comparison';
@@ -1722,13 +1728,13 @@ function renderCompareResults(cmp){
   html+='<div class="score-value" style="color:'+scoreColor+'">'+score+'</div>';
   html+='</div>';
   html+='<div class="compare-score-details">';
-  html+='<h4><span class="score-verdict '+scoreClass+'">'+scoreLabel+'</span> — Regression Score: '+score+'/100</h4>';
+  html+='<h4><span class="score-verdict '+scoreClass+'">'+scoreLabel+'</span> — Heuristic indicator: '+score+'/100</h4>';
   html+='<div class="score-desc">';
   if(score<=10) html+='The current run shows consistent improvements across instructions, codegen, and pass behavior.';
   else if(score<=30) html+='The current run shows mostly improvements with minor variations.';
   else if(score<=60) html+='The current run shows mixed results — some areas improved, others regressed.';
   else html+='The current run shows significant regressions that may warrant investigation.';
-  html+='</div></div></div>';
+  html+='</div><div class="score-desc" style="margin-top:6px;opacity:.75">Heuristic composite of instruction/codegen deltas and finding counts — a triage aid, not a benchmark.</div></div></div>';
 
   html+='<div class="compare-summary-counts reveal">';
   html+='<div class="summary-count red"><span class="count-num">'+highReg+'</span> High Severity</div>';
