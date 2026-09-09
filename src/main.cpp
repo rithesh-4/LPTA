@@ -244,7 +244,9 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                         if (rest.empty()) {
                             inEvents = true;  // pretty-printed: entries follow
                         } else if (rest[0] == ']') {
-                            /* empty array ("events": []) — nothing to parse */
+                            // Empty array ("events": []) — valid, nothing to
+                            // parse; mark closed so the check below passes.
+                            sawEventsClose = true;
                         } else if (rest.find(']') != std::string::npos) {
                             errs() << "ERROR: minified single-line events array is not supported; "
                                    << "use pretty-printed history.json as written by lpta_test\n";
@@ -437,7 +439,9 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                         if (rest.empty()) {
                             inEvents = true;  // pretty-printed: entries follow
                         } else if (rest[0] == ']') {
-                            /* empty array ("events": []) — nothing to parse */
+                            // Empty array ("events": []) — valid, nothing to
+                            // parse; mark closed so the check below passes.
+                            sawEventsClose = true;
                         } else if (rest.find(']') != std::string::npos) {
                             errs() << "ERROR: minified single-line events array is not supported; "
                                    << "use pretty-printed history.json as written by lpta_test\n";
