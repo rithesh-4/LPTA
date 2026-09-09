@@ -38,6 +38,11 @@ tests/judge_demo/output/
 tests/correctness_report.txt
 tests/test_report.txt
 tests/fuzz_results.log
+# Golden test evidence (regenerated each run)
+tests/compare_golden/**/.cli.*
+tests/compare_golden/**/.srv.*
+tests/compare_golden/**/.ovr.*
+tests/compare_golden/**/.norm.err
 test_history_empty_tmp.json
 test_output.txt
 

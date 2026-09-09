@@ -4,6 +4,7 @@
 #include "Tracker.h"
 
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Config/llvm-config.h"
 
 #include <cassert>
 #include <cstdio>
@@ -88,8 +89,24 @@ bool writeHistoryJSON(const std::string &filename, const CodegenResult &cg) {
     }
 
     f << "{\n";
+    f << "  \"schema_version\": " << LPTA_SCHEMA_VERSION << ",\n";
     f << "  \"module_name\": \"" << jsonEscape(g_module_name) << "\",\n";
     f << "  \"pipeline\": \"" << g_opt_level << "\",\n";
+    f << "  \"run_metadata\": {\n";
+    f << "    \"input_ir_hash\": \"" << jsonEscape(g_input_ir_hash) << "\",\n";
+    f << "    \"module_identifier\": \"" << jsonEscape(g_module_name) << "\",\n";
+    f << "    \"llvm_version\": \"" << LLVM_VERSION_STRING << "\",\n";
+    f << "    \"lpta_version\": \"" << LPTA_VERSION << "\",\n";
+    f << "    \"pipeline\": \"" << g_opt_level << "\",\n";
+    f << "    \"target_triple\": \"" << jsonEscape(g_target_triple) << "\",\n";
+    f << "    \"snapshot_enabled\": " << (g_snapshots ? "true" : "false") << ",\n";
+    f << "    \"codegen_targets\": [";
+    for (size_t i = 0; i < g_target_triples.size(); i++) {
+        if (i > 0) f << ", ";
+        f << "\"" << jsonEscape(g_target_triples[i]) << "\"";
+    }
+    f << "]\n";
+    f << "  },\n";
 
     // Events array
     f << "  \"events\": [\n";

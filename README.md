@@ -193,17 +193,29 @@ python serve_dashboard.py report -p 8080
 
 The **Compare** page (key `5`) loads two `history.json` files and computes:
 - Summary delta (instructions, BBs, codegen, invalidated)
-- Per-target codegen regression (dashboard Compare tab and CLI `--compare` agree)
-- Per-pass impact delta (a pass counts as changed if counters moved *or* IR hash moved)
+- Per-target codegen comparison with explicit states (`comparable`, added/removed targets, per-side errors — never zero-filled)
+- Per-pass presence (did it execute?) kept separate from pass effect (did it change IR?)
 - Auto-detected regressions (>5% instruction/codegen increase)
 
-> **Heuristic indicator (0–100, higher = worse):** the score is a triage aid, not a
-> benchmark. Formula: `40%` instruction-delta term (`clamp(50 + pct, 0, 100)`) +
-> `30%` codegen-delta term + finding term (`min(30, 15·high + 5·medium)·0.2` −
-> `min(20, 10·improvements)·0.1`). Bands: ≤10 improved, ≤30 mostly improved,
-> ≤60 mixed, >60 regressed (CLI exits 1 above 60). The same formula is
-> implemented twice — `src/main.cpp` (`--compare`) and `serve_dashboard.py`
-> (`/api/compare`) — keep them in sync.
+> **Regression risk score (0–100, higher = worse):** a heuristic triage aid, not a
+> benchmark. Identical reports score exactly `0` (`unchanged`); improvements-only
+> also scores `0` (`improved`). Components: instructions `40·clamp(max(0,pct)/50)`,
+> codegen `30·clamp(max(0,pct)/50)`, pass effects `min(20, 10·high + 3·medium)`,
+> measurement quality `min(10, 5·errored targets)` — all percentages rounded to
+> one decimal (half away from zero), all counts from severities. Verdicts:
+> `0` unchanged/improved, `1–60` mixed, `>60` regressed (CLI exits 1 on
+> regressed, 2 when the pair is incomparable). Percentages use one definition
+> everywhere: `100·(new−old)/old` (1 decimal); a zero baseline with nonzero
+> current is *unavailable*, reported as an absolute delta only. The same
+> contract is implemented twice — `src/main.cpp` (`--compare`, plus `--json`
+> for the canonical machine-readable result) and `serve_dashboard.py`
+> (`/api/compare`) — keep them byte-equivalent via `tests/compare_golden/`.
+
+Reports carry `schema_version` plus `run_metadata` (input hash, module id,
+LLVM/LPTA versions, pipeline, triple, snapshot flag, requested targets).
+Comparing reports from different inputs is blocked unless overridden
+(CLI `--allow-different-input`, API `allow_different_input`); version,
+pipeline, and target-set drift produce warnings.
 
 #### Workflow
 ```bash

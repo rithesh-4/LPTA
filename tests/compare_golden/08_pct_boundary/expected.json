@@ -1,0 +1,19 @@
+{
+  "blocked": false,
+  "cli_rc": 0,
+  "improvements": 0,
+  "pass_status": {
+    "EdgePass": [
+      "present_in_both",
+      "newly_effectful"
+    ],
+    "UpPass": [
+      "present_in_both",
+      "newly_effectful"
+    ]
+  },
+  "regressions": 1,
+  "score": 3,
+  "target_states": {},
+  "verdict": "mixed"
+}

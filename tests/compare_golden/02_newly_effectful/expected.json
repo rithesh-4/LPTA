@@ -1,0 +1,15 @@
+{
+  "blocked": false,
+  "cli_rc": 0,
+  "improvements": 1,
+  "pass_status": {
+    "FooPass": [
+      "present_in_both",
+      "newly_effectful"
+    ]
+  },
+  "regressions": 0,
+  "score": 0,
+  "target_states": {},
+  "verdict": "improved"
+}

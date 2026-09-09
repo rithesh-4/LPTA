@@ -44,7 +44,7 @@ mkdir -p "$TMP"
 # --- CLI side ---
 CLI_OUT=$("$EXE" --compare "$TMP/base/history.json" "$TMP/curr/history.json" 2>&1)
 CLI_RC=$?
-CLI_SCORE=$(echo "$CLI_OUT" | grep -oE "Heuristic indicator: [0-9]+" | grep -oE "[0-9]+")
+CLI_SCORE=$(echo "$CLI_OUT" | grep -oE "Regression risk score: [0-9]+" | grep -oE "[0-9]+")
 if [ -z "$CLI_SCORE" ]; then
     fail "could not parse CLI score"
     echo "$CLI_OUT" | head -5

@@ -1,0 +1,10 @@
+{
+  "blocked": false,
+  "cli_rc": 0,
+  "improvements": 0,
+  "pass_status": {},
+  "regressions": 1,
+  "score": 10,
+  "target_states": {},
+  "verdict": "mixed"
+}

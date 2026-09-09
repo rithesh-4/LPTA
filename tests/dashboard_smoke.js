@@ -35,6 +35,7 @@ function mkEl() {
         style: {}, dataset: {},
         classList: { add() {}, remove() {}, contains: () => false },
         addEventListener() {}, appendChild() {}, removeChild() {},
+        prepend() {},
         click() {}, focus() {}, scrollIntoView() {},
         getContext: () => mkCtx(),
         getBoundingClientRect: () => ({ width: 800, height: 200 }),
@@ -160,8 +161,18 @@ try {
     __setFetchMode("compare-ok");
     await runCompare();
     for (let i = 0; i < 5; i++) await Promise.resolve();
-    check("compare labels heuristic indicator",
-        __els["compare-results"].innerHTML.includes("Heuristic indicator"));
+    check("compare labels risk score",
+        __els["compare-results"].innerHTML.includes("Regression risk score"));
+
+    // 5b. incomparable response renders the blocked state, never throws
+    renderCompareResults({ regression_score: null, verdict: "incomparable",
+        regressions: [], improvements: [], passes: [], targets: [],
+        new_passes: [], removed_passes: [],
+        summary: {}, base_meta: {}, curr_meta: {},
+        compat: { blocked: "different input IR", warnings: ["w1"] } });
+    check("incomparable renders blocked message",
+        __els["compare-results"].innerHTML.includes("Incomparable") &&
+        __els["compare-results"].innerHTML.includes("different input IR"));
 
     // 6. old-schema summary (no passes_with_ir_changes) still renders
     const s2 = JSON.parse(JSON.stringify(D.summary));
@@ -169,6 +180,29 @@ try {
     D.summary = s2;
     renderOverview();
     check("old summary schema renders", __els["overview-cards"].innerHTML.length > 100);
+
+    // 7. ordered diff: moved lines align, duplicates preserved
+    const dr = orderedDiff(["a", "x", "b", "x", "c"], ["x", "a", "x", "b", "c"]);
+    check("ordered diff aligns moves",
+        !dr.fallback && dr.rows.filter((r) => r.t === " ").length === 4 &&
+        dr.rows.filter((r) => r.t === "-").length === 1 &&
+        dr.rows.filter((r) => r.t === "+").length === 1);
+    const dr2 = orderedDiff(["same"], ["same"]);
+    check("identical diff has no changes",
+        !dr2.fallback && dr2.rows.length === 1 && dr2.rows[0].t === " ");
+
+    // 8. unavailable values render N/A, tampered summary warns
+    D.summary = JSON.parse(JSON.stringify(s2));
+    D.summary.codegen_asm_lines_before = null;
+    renderOverview();
+    check("unavailable codegen renders N/A",
+        __els["overview-cards"].innerHTML.includes(">N/A<"));
+    D.summary.total_before = (D.summary.total_before || 0) + 1000;
+    const norm = normalizeHistory(D);
+    check("tampered summary flagged", norm.mismatch === true);
+    showIntegrityBanner(norm);
+    check("integrity banner shown",
+        (__els["integrity-banner"] || { innerHTML: "" }).innerHTML.includes("integrity notice"));
 } catch (err) {
     __failures++;
     console.log("  [FAIL] driver threw: " + (err && err.stack));

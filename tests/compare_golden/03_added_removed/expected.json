@@ -1,0 +1,23 @@
+{
+  "blocked": false,
+  "cli_rc": 0,
+  "improvements": 1,
+  "pass_status": {
+    "FooPass": [
+      "present_in_both",
+      "unchanged_effect"
+    ],
+    "GonePass": [
+      "removed",
+      "no_longer_effectful"
+    ],
+    "NewPass": [
+      "added",
+      "newly_effectful"
+    ]
+  },
+  "regressions": 1,
+  "score": 0,
+  "target_states": {},
+  "verdict": "unchanged"
+}

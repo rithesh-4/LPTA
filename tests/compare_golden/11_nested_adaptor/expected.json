@@ -1,0 +1,19 @@
+{
+  "blocked": false,
+  "cli_rc": 0,
+  "improvements": 1,
+  "pass_status": {
+    "AdaptPass": [
+      "present_in_both",
+      "newly_effectful"
+    ],
+    "ChildPass": [
+      "added",
+      "newly_effectful"
+    ]
+  },
+  "regressions": 1,
+  "score": 0,
+  "target_states": {},
+  "verdict": "improved"
+}

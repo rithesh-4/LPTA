@@ -1,0 +1,14 @@
+{
+  "blocked": false,
+  "cli_rc": 0,
+  "improvements": 1,
+  "pass_status": {},
+  "regressions": 1,
+  "score": 0,
+  "target_states": {
+    "gone": "removed_target",
+    "new-t": "new_target",
+    "x86": "comparable"
+  },
+  "verdict": "unchanged"
+}

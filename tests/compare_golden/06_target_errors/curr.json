@@ -1,0 +1,55 @@
+{
+  "schema_version": 2,
+  "module_name": "t.ll",
+  "pipeline": "O2",
+  "run_metadata": {
+    "input_ir_hash": "aa",
+    "module_identifier": "t.ll",
+    "llvm_version": "22.1.8",
+    "lpta_version": "1.0",
+    "pipeline": "O2",
+    "target_triple": "x",
+    "snapshot_enabled": false,
+    "codegen_targets": []
+  },
+  "events": [],
+  "summary": {
+    "total_events": 0,
+    "total_before": 0,
+    "total_after": 0,
+    "total_invalidated": 0,
+    "passes_with_changes": 0,
+    "passes_with_ir_changes": 0,
+    "unique_pass_names": 1,
+    "total_instructions_before": 100,
+    "total_instructions_after": 100,
+    "total_bbs_before": 10,
+    "total_bbs_after": 10,
+    "codegen_asm_lines_before": 200,
+    "codegen_asm_lines_after": 200,
+    "codegen_asm_bytes_before": 2000,
+    "codegen_asm_bytes_after": 2000,
+    "codegen_error_before": null,
+    "codegen_error_after": null,
+    "codegen_targets": {
+      "x86": {
+        "asm_lines_before": 0,
+        "asm_lines_after": 0,
+        "asm_bytes_before": 0,
+        "asm_bytes_after": 0,
+        "error": "boom-curr"
+      },
+      "ok": {
+        "asm_lines_before": 100,
+        "asm_lines_after": 90,
+        "asm_bytes_before": 1000,
+        "asm_bytes_after": 900,
+        "error": null
+      }
+    },
+    "optnone_detected": false,
+    "optnone_function_count": 0,
+    "optnone_functions": [],
+    "optnone_warning": ""
+  }
+}

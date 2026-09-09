@@ -583,6 +583,18 @@ else
 fi
 echo "" | tee -a "$REPORT"
 
+echo "Phase 8: Compare golden fixtures (12 cases)" | tee -a "$REPORT"
+if [ -f "$SCRIPT_DIR/compare_golden.sh" ]; then
+    if bash "$SCRIPT_DIR/compare_golden.sh" "$BUILD_DIR" >>"$REPORT" 2>&1; then
+        pass "compare_golden.sh: 12/12 byte-equivalent with expectations"
+    else
+        fail "compare_golden.sh failed (see above in $REPORT)"
+    fi
+else
+    echo "  [SKIP] compare_golden.sh not found" | tee -a "$REPORT"
+fi
+echo "" | tee -a "$REPORT"
+
 # -------------------------------------------------------
 # Summary
 # -------------------------------------------------------
