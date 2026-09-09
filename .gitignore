@@ -21,9 +21,13 @@ demo_*/
 run_llc_*.bat
 *.run_llc.bat
 
-# Local agent/tool state (large vendored deps live here)
-.opencode/node_modules/
-.opencode/*.log
+# Local agent/tool state
+.opencode/
+
+# Node modules (Playwright dev dependency)
+node_modules/
+package.json
+package-lock.json
 
 # Generated IR snapshots
 ir_before_opt.ll
