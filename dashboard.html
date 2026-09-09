@@ -453,7 +453,7 @@ canvas.sparkline{width:100%;height:80px;display:block}
   </div>
   <!-- FUNCTIONS -->
   <div class="page" id="page-functions">
-    <div class="page-header reveal"><h2>Function Impact</h2><p>Click any function to see which passes changed it and how</p></div>
+    <div class="page-header reveal"><h2>Function-Scoped Callback Changes</h2><p>Net instruction change across function-scoped pass callbacks</p></div>
     <div class="func-grid" id="func-grid"></div>
   </div>
   <!-- PASSES -->
@@ -683,7 +683,7 @@ function renderOverview(){
     {icon:'🧬',iconCls:'purple',value:anyIrPasses,label:'Any-IR-change callbacks',sub:'counters or IR text changed',fmt:'num'},
     {icon:'🎯',iconCls:'purple',value:rate,label:'IR-changing callback rate',sub:rate!=null?`${anyIrPasses}/${totalAfter} changed`:'share of completed callbacks',fmt:'pct'},
     {icon:'⚡',iconCls:'green',value:iPct,label:'Whole-module instruction change',sub:s.total_instructions_before!=null&&s.total_instructions_after!=null?`${s.total_instructions_before} → ${s.total_instructions_after} (${-iRed>0?'+':''}${-iRed})`:'initial/final totals unavailable',fmt:'pct'},
-    {icon:'📦',iconCls:'yellow',value:cgPct,label:'Assembly line-count change',sub:cgPct!=null?`${s.codegen_asm_lines_before} → ${s.codegen_asm_lines_after} lines (size proxy, not runtime)`:'codegen unavailable or failed',fmt:'pct'},
+    {icon:'📦',iconCls:'yellow',value:cgPct,label:'Assembly line-count change',sub:cgPct!=null?`${s.codegen_asm_lines_before} → ${s.codegen_asm_lines_after} lines (${-cgRed>0?'+':''}${-cgRed}) (size proxy, not runtime)`:'codegen unavailable or failed',fmt:'pct'},
     {icon:'⚠️',iconCls:'red',value:s.total_invalidated,label:'No-after-state callbacks',sub:'pass deleted its own IR unit',fmt:'num'},
   ];
   document.getElementById('overview-cards').innerHTML=cards.map((c,i)=>`
@@ -746,11 +746,11 @@ function showIntegrityBanner(norm){
 }
 
 function renderTopPassesCompact(){
-  if(!D)return;const ch=D.events.filter(e=>e.event_type==='after'&&(e.has_changes||e.ir_changed));
-  const bp={};for(const e of ch){const k=e.pass_name;if(!bp[k])bp[k]={name:k,iD:0,count:0};bp[k].iD+=e.metrics_after.instruction_count-e.metrics_before.instruction_count;bp[k].count++}
+  if(!D)return;const ch=D.events.filter(e=>hasAnyIRChange(e)&&isTransformation(e));
+  const bp={};for(const e of ch){const k=e.pass_name;const ib=e.metrics_before?.instruction_count,ia=e.metrics_after?.instruction_count;if(ib==null||ia==null)continue;if(!bp[k])bp[k]={name:k,iD:0,count:0};bp[k].iD+=ia-ib;bp[k].count++}
   const sorted=Object.values(bp).sort((a,b)=>a.iD-b.iD).slice(0,6);
   if(!sorted.length){document.getElementById('overview-top-passes').innerHTML='';return}
-  document.getElementById('overview-top-passes').innerHTML=`<div class="chart-container reveal"><div class="chart-header"><h3>Top Passes by Impact</h3><span class="hint">Aggregated instruction delta</span></div><div style="padding:14px 22px"><div class="top-grid">${sorted.map(p=>{const cls=p.iD<0?'neg':p.iD>0?'pos':'zero';return `<div class="top-card"><div><div class="tp-name">${esc(p.name)}</div><div class="tp-count">${p.count}×</div></div><div style="text-align:right"><div class="tp-delta ${cls}">${p.iD>0?'+':''}${p.iD}</div><div class="tp-sub">instr</div></div></div>`}).join('')}</div></div></div>`;
+  document.getElementById('overview-top-passes').innerHTML=`<div class="chart-container reveal"><div class="chart-header"><h3>Top Passes by Impact</h3><span class="hint">Direct transformation deltas (excludes adaptors/pipeline)</span></div><div style="padding:14px 22px"><div class="top-grid">${sorted.map(p=>{const cls=p.iD<0?'neg':p.iD>0?'pos':'zero';return `<div class="top-card"><div><div class="tp-name">${esc(p.name)}</div><div class="tp-count">${p.count}×</div></div><div style="text-align:right"><div class="tp-delta ${cls}">${p.iD>0?'+':''}${p.iD}</div><div class="tp-sub">instr</div></div></div>`}).join('')}</div></div></div>`;
 }
 
 // ===== CROSS-TARGET CODEGEN =====
@@ -855,10 +855,13 @@ function renderOverviewCharts(){
 function renderFunctions(){
   if(!D)return;const fm={};
   for(const e of D.events){
-    if(e.ir_kind!=='Function'||e.event_type!=='after'||!(e.has_changes||e.ir_changed))continue;
+    if(e.ir_kind!=='Function'||!isCompleted(e)||!hasAnyIRChange(e))continue;
     const n=e.ir_name;
-    if(!fm[n])fm[n]={before:e.metrics_before.instruction_count,after:e.metrics_after.instruction_count,passes:0,bbs_before:e.metrics_before.basic_block_count,bbs_after:e.metrics_after.basic_block_count};
-    fm[n].after=e.metrics_after.instruction_count;fm[n].bbs_after=e.metrics_after.basic_block_count;fm[n].passes++;
+    const ib=e.metrics_before?.instruction_count, ia=e.metrics_after?.instruction_count;
+    const bb=e.metrics_before?.basic_block_count, ba=e.metrics_after?.basic_block_count;
+    if(ib==null&&ia==null)continue;
+    if(!fm[n])fm[n]={before:ib??0,after:ia??0,passes:0,bbs_before:bb??0,bbs_after:ba??0};
+    fm[n].after=ia??fm[n].after;fm[n].bbs_after=ba??fm[n].bbs_after;fm[n].passes++;
   }
   const funcs=Object.entries(fm).map(([n,m])=>({name:n,before:m.before,after:m.after,delta:m.after-m.before,passes:m.passes,pct:m.before?Math.round((m.before-m.after)/m.before*100):0,bbs_before:m.bbs_before,bbs_after:m.bbs_after})).sort((a,b)=>a.delta-b.delta);
   if(!funcs.length){document.getElementById('func-grid').innerHTML='<div style="padding:60px;text-align:center;color:var(--text-muted)">No function-level changes detected</div>';return}
@@ -866,12 +869,12 @@ function renderFunctions(){
   document.getElementById('func-grid').innerHTML=funcs.map((f,i)=>{
     const cls=f.delta<0?'positive':f.delta>0?'negative':'zero';
     return `<div class="func-card reveal stagger-${(i%6)+1}" data-func="${esc(f.name)}" onclick="openFuncDetail(this.dataset.func)" title="Function ${esc(f.name)} — click to explore every pass execution on it">
-      <div class="func-head"><div class="func-name">${esc(f.name)}</div><div class="func-delta ${cls}" title="Net instruction change across all changing passes on this function">${f.delta>0?'+':''}${f.delta}</div></div>
-      <div class="func-meta" title="Share of instructions removed relative to before">${f.pct}% instruction reduction · ${f.passes} passes</div>
+      <div class="func-head"><div class="func-name">${esc(f.name)}</div><div class="func-delta ${cls}" title="Function-scoped delta: first changed callback → last changed callback">${f.delta>0?'+':''}${f.delta}</div></div>
+      <div class="func-meta" title="Share of instructions changed (function-scoped callback delta) relative to before">${f.pct}% function-scoped delta · ${f.passes} callbacks</div>
       <div class="func-bar-outer"><div class="func-bar-inner ${f.delta<=0?'green':'red'}" style="width:0%" data-width="${mx?f.before/mx*100:0}%"></div></div>
       <div class="func-stats">
-        <div class="func-stat" title="Instruction count before → after optimization">Instr: <span>${f.before} → ${f.after}</span></div>
-        <div class="func-stat" title="Basic-block count before → after optimization">BBs: <span>${f.bbs_before} → ${f.bbs_after}</span></div>
+        <div class="func-stat" title="Instructions: first → last changing callback">Instr: <span>${f.before} → ${f.after}</span></div>
+        <div class="func-stat" title="BBs: first → last changing callback">BBs: <span>${f.bbs_before} → ${f.bbs_after}</span></div>
       </div>
       <div class="func-click">Click to explore →</div>
     </div>`}).join('');
@@ -891,7 +894,8 @@ function openFuncDetail(funcName){
   // Pass list
   let cumInstr=passEvents[0]?.metrics_before?.instruction_count||0;
   const passItems=passEvents.map((e,i)=>{
-    const delta=e.metrics_after.instruction_count-e.metrics_before.instruction_count;
+    const ib=e.metrics_before?.instruction_count??0, ia=e.metrics_after?.instruction_count??0;
+    const delta=ia-ib;
     cumInstr+=delta;
     const cls=delta<0?'neg':delta>0?'pos':'zero';
     const irState=e.has_changes?(e.ir_before?'has IR diff':'changed · no snapshot'):e.ir_changed?(e.ir_before?'IR diff (counters equal)':'IR modified · no snapshot'):e.event_type==='invalidated'?'invalidated':'no change';
@@ -910,7 +914,7 @@ function openFuncDetail(funcName){
   document.getElementById('func-pass-list').innerHTML=passItems.join('');
 
   // Chart: instruction count over passes
-  const chartData=passEvents.map((e,i)=>({i,name:e.pass_name,before:e.metrics_before.instruction_count,after:e.metrics_after.instruction_count,delta:e.metrics_after.instruction_count-e.metrics_before.instruction_count,hasChanges:(e.has_changes||e.ir_changed)}));
+  const chartData=passEvents.map((e,i)=>({i,name:e.pass_name,before:e.metrics_before?.instruction_count??0,after:e.metrics_after?.instruction_count??0,delta:(e.metrics_after?.instruction_count??0)-(e.metrics_before?.instruction_count??0),hasChanges:(e.has_changes||e.ir_changed)}));
   FUNC_CHART_DATA=chartData;
   // Open the modal BEFORE drawing: the canvas measures zero while display:none
   document.getElementById('func-modal-bg').classList.add('open');
@@ -1004,10 +1008,10 @@ document.getElementById('func-modal-bg').addEventListener('click',function(e){if
 // ===== PASSES =====
 function renderPasses(){if(!D)return;renderTopPasses();renderEvents()}
 function renderTopPasses(){
-  if(!D)return;const ch=D.events.filter(e=>e.event_type==='after'&&(e.has_changes||e.ir_changed));
-  const bp={};for(const e of ch){const k=e.pass_name;if(!bp[k])bp[k]={name:k,iD:0,bD:0,count:0};bp[k].iD+=e.metrics_after.instruction_count-e.metrics_before.instruction_count;bp[k].bD+=e.metrics_after.basic_block_count-e.metrics_before.basic_block_count;bp[k].count++}
+  if(!D)return;const ch=D.events.filter(e=>hasAnyIRChange(e)&&isTransformation(e));
+  const bp={};for(const e of ch){const k=e.pass_name;const ib=e.metrics_before?.instruction_count,ia=e.metrics_after?.instruction_count,bb=e.metrics_before?.basic_block_count,ba=e.metrics_after?.basic_block_count;if(ib==null||ia==null)continue;if(!bp[k])bp[k]={name:k,iD:0,bD:0,count:0};bp[k].iD+=ia-ib;bp[k].bD+=(ba??0)-(bb??0);bp[k].count++}
   const sorted=Object.values(bp).sort((a,b)=>a.iD-b.iD);
-  document.getElementById('top-passes-grid').innerHTML=sorted.map(p=>{const cls=p.iD<0?'neg':p.iD>0?'pos':'zero';return `<div class="top-card" title="${esc(p.name)}: summed across ${p.count} changing execution(s)"><div><div class="tp-name">${esc(p.name)}</div><div class="tp-count" title="Number of executions that changed the IR">${p.count}×</div></div><div style="text-align:right"><div class="tp-delta ${cls}" title="Total instruction delta">${p.iD>0?'+':''}${p.iD}</div><div class="tp-sub" title="Total basic-block delta">${p.bD>0?'+':''}${p.bD} BBs</div></div></div>`}).join('');
+  document.getElementById('top-passes-grid').innerHTML=sorted.map(p=>{const cls=p.iD<0?'neg':p.iD>0?'pos':'zero';return `<div class="top-card" title="${esc(p.name)}: summed across ${p.count} changing transformation execution(s)"><div><div class="tp-name">${esc(p.name)}</div><div class="tp-count" title="Number of transformation executions that changed the IR">${p.count}×</div></div><div style="text-align:right"><div class="tp-delta ${cls}" title="Total instruction delta">${p.iD>0?'+':''}${p.iD}</div><div class="tp-sub" title="Total basic-block delta">${p.bD>0?'+':''}${p.bD} BBs</div></div></div>`}).join('');
 }
 function renderEvents(){
   if(!D)return;const q=document.getElementById('search').value.toLowerCase();
@@ -1028,7 +1032,7 @@ function renderEvents(){
     const canView=e.event_type==='after'&&(e.has_changes||e.ir_changed)&&e.ir_before;
     let d='';
     if(e.event_type==='after'){
-      if(e.has_changes){const p=[];const ms=['instruction_count','basic_block_count','branch_count','phi_count','call_count','load_count','store_count'];const ls=['instr','BB','br','phi','call','ld','st'];for(let j=0;j<ms.length;j++){const v=e.metrics_after[ms[j]]-e.metrics_before[ms[j]];if(v!==0)p.push(`<span class="${v<0?'neg':'pos'}">${ls[j]}${v>0?'+':''}${v}</span>`)}if(e.ir_changed&&!p.length)p.push('<span class="pos">IR modified</span>');d=p.join(' ')}
+      if(e.has_changes){const p=[];const ms=['instruction_count','basic_block_count','branch_count','phi_count','call_count','load_count','store_count'];const ls=['instr','BB','br','phi','call','ld','st'];for(let j=0;j<ms.length;j++){const bv=e.metrics_before?.[ms[j]],av=e.metrics_after?.[ms[j]];if(bv==null||av==null)continue;const v=av-bv;if(v!==0)p.push(`<span class="${v<0?'neg':'pos'}">${ls[j]}${v>0?'+':''}${v}</span>`)}if(e.ir_changed&&!p.length)p.push('<span class="pos">IR modified</span>');d=p.join(' ')}
       else if(e.ir_changed)d='<span class="pos">IR modified · counters equal</span>';
       else d='<span class="nc">—</span>';
     }else if(e.event_type==='invalidated')d='<span class="nc">invalidated</span>';
@@ -1220,6 +1224,12 @@ function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g
 // Passes-with-IR-changes, with fallback for histories written before
 // passes_with_ir_changes existed (then it equals the metric count).
 function changedCount(s){return (s.passes_with_ir_changes==null)?s.passes_with_changes:s.passes_with_ir_changes}
+// Centralized change predicates — use these everywhere instead of inlining.
+const isCompleted=e=>e.event_type==='after';
+const hasMetricChange=e=>isCompleted(e)&&e.has_changes===true;
+const hasAnyIRChange=e=>isCompleted(e)&&(e.has_changes===true||e.ir_changed===true);
+const isTransformation=e=>e.pass_type==='transformation';
+const isContainer=e=>e.pass_type==='adaptor'||e.pass_type==='pipeline';
 // Human-readable metric metadata: [short label, plain-English explanation].
 // Shared by every before → after readout so numbers explain themselves.
 const METRIC_INFO={
@@ -1245,10 +1255,12 @@ const METRIC_INFO={
 // appears when the value actually moved (a bare "7 → 7" means no change).
 function metricChips(e){
   return Object.keys(METRIC_INFO).map(k=>{
-    const b=(e.metrics_before&&e.metrics_before[k])||0,a=(e.metrics_after&&e.metrics_after[k])||0,d=a-b;
+    const b=e.metrics_before?.[k], a=e.metrics_after?.[k];
     const info=METRIC_INFO[k];
+    if(b==null&&a==null) return `<div class="m" title="${info[1]}"><span class="ml">${info[0]}:</span><span class="mv">N/A</span></div>`;
+    const bv=b??0, av=a??0, d=av-bv;
     const delta=d?` <span class="md ${d<0?'neg':'pos'}" title="Change made by this pass">(${d>0?'+':''}${d})</span>`:'';
-    return `<div class="m" title="${info[1]}"><span class="ml">${info[0]}:</span><span class="mv">${b} → ${a}</span>${delta}</div>`;
+    return `<div class="m" title="${info[1]}"><span class="ml">${info[0]}:</span><span class="mv">${bv} → ${av}</span>${delta}</div>`;
   }).join('');
 }
 // ===== ORDERED DIFF =====
@@ -1338,7 +1350,7 @@ function attachChartTooltip(){
     if(idx<0||idx>=n){tooltip.style.display='none';return}
     const e=evts[idx];if(Math.abs((pad.left+idx*xStep)-mx)>15){tooltip.style.display='none';return}
     let html=`<div class="tt-name">${esc(e.pass_name)}</div><div class="tt-ir">${e.ir_kind} ${esc(e.ir_name)} \u00b7 depth ${e.depth}</div>`;
-    if(e.event_type==='after'&&(e.has_changes||e.ir_changed)){const d=e.metrics_after.instruction_count-e.metrics_before.instruction_count;html+=`<div class="tt-delta">${d>0?'+':''}${d} instructions${e.ir_changed&&!e.has_changes?' · IR modified':''}</div>`}
+    if(e.event_type==='after'&&(e.has_changes||e.ir_changed)){const d=(e.metrics_after?.instruction_count??0)-(e.metrics_before?.instruction_count??0);html+=`<div class="tt-delta">${d>0?'+':''}${d} instructions${e.ir_changed&&!e.has_changes?' · IR modified':''}</div>`}
     tooltip.innerHTML=html;tooltip.style.display='block';tooltip.style.left=Math.min(mx+14,W-210)+'px';tooltip.style.top=(my-12)+'px';
   },{signal});
   canvas.addEventListener('mouseleave',()=>{tooltip.style.display='none'},{signal});
