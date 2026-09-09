@@ -200,6 +200,9 @@ identity policy in a trusted reverse proxy. Remote mode serves only the dashboar
 
 The **Compare** page (key `5`) loads two `history.json` files and computes:
 - Summary delta (instructions, BBs, codegen, invalidated)
+- Top-level codegen deltas only when the required before/after measurements
+  succeeded; failed `llc` sides remain unavailable and do not affect findings,
+  score components, or coverage
 - Per-target codegen comparison with explicit states (`comparable`, added/removed targets, per-side errors — never zero-filled)
 - Per-pass presence (did it execute?) kept separate from pass effect (did it change IR?)
 - Auto-detected regressions (>5% instruction/codegen increase)
@@ -217,6 +220,9 @@ The **Compare** page (key `5`) loads two `history.json` files and computes:
 > contract is implemented twice — `src/main.cpp` (`--compare`, plus `--json`
 > for the canonical machine-readable result) and `serve_dashboard.py`
 > (`/api/compare`) — keep them byte-equivalent via `tests/compare_golden/`.
+
+Both engines reject reports missing required summary, event, lifecycle-metric,
+or codegen-availability fields before computing any comparison.
 
 Reports carry `schema_version` plus `run_metadata` (input hash, module id,
 LLVM/LPTA versions, pipeline, triple, snapshot flag, requested targets).
@@ -562,7 +568,8 @@ bash tests/run_all_tests.sh build/   # Run full test suite
 
 CI uses the official LLVM 22.1.8 Windows MSVC archive with a pinned SHA-256,
 configures with `clang-cl`, then runs CTest, comparison golden/parity fixtures,
-and the dashboard smoke test.
+schema-omission and failed-codegen availability cases, and the dashboard smoke
+test.
 
 ## License
 

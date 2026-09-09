@@ -23,6 +23,7 @@
 #include "llvm/TargetParser/Host.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/SourceMgr.h"
+#include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
@@ -37,6 +38,7 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <iterator>
 #include <cmath>
 #include <algorithm>
 #include <cstdlib>
@@ -137,73 +139,175 @@ static bool validateCompareJsonScalars(const std::string &path) {
         errs() << "ERROR: cannot open comparison file '" << path << "'\n";
         return false;
     }
-    static const std::set<std::string> countKeys = {
-        "schema_version", "id", "depth",
-        "instruction_count", "basic_block_count", "function_count",
-        "global_count", "call_count", "load_count", "store_count",
-        "branch_count", "phi_count", "return_count", "op_arith",
-        "op_cmp", "op_memory", "op_control", "op_cast", "op_call",
-        "op_vector", "op_other", "total_events", "total_before",
-        "total_after", "total_invalidated", "passes_with_changes",
-        "passes_with_ir_changes", "unique_pass_names",
+    std::string content((std::istreambuf_iterator<char>(file)),
+                        std::istreambuf_iterator<char>());
+    auto parsed = json::parse(content);
+    if (!parsed) {
+        errs() << "ERROR: invalid JSON in '" << path << "': "
+               << toString(parsed.takeError()) << "\n";
+        return false;
+    }
+    auto *root = parsed->getAsObject();
+    if (!root) {
+        errs() << "ERROR: comparison file '" << path
+               << "' must contain a JSON object\n";
+        return false;
+    }
+    auto fail = [&](const std::string &field, const std::string &reason) {
+        errs() << "ERROR: invalid comparison schema in '" << path << "': "
+               << field << " " << reason << "\n";
+        return false;
+    };
+    auto requireCount = [&](const json::Object &object,
+                            StringRef key, const std::string &prefix) {
+        const json::Value *value = object.get(key);
+        auto integer = value ? value->getAsInteger() : std::nullopt;
+        return integer && *integer >= 0
+            ? true : fail(prefix + key.str(), "must be a non-negative integer");
+    };
+    auto requireString = [&](const json::Object &object,
+                             StringRef key, const std::string &prefix,
+                             bool nonempty) {
+        auto value = object.getString(key);
+        return value && (!nonempty || !value->empty())
+            ? true : fail(prefix + key.str(),
+                          nonempty ? "must be a non-empty string"
+                                   : "must be a string");
+    };
+    auto validateNullableString = [&](const json::Object &object,
+                                      StringRef key,
+                                      const std::string &prefix) {
+        const json::Value *value = object.get(key);
+        return value && (value->getAsNull() || value->getAsString())
+            ? true : fail(prefix + key.str(), "must be a string or null");
+    };
+
+    if (!requireString(*root, "module_name", "", true) ||
+        !requireString(*root, "pipeline", "", true))
+        return false;
+    if (const json::Value *schema = root->get("schema_version")) {
+        auto integer = schema->getAsInteger();
+        if (!integer || *integer < 0)
+            return fail("schema_version", "must be a non-negative integer");
+    }
+
+    auto *summary = root->getObject("summary");
+    if (!summary)
+        return fail("summary", "must be an object");
+    static const std::vector<StringRef> summaryCounts = {
+        "total_events", "total_before", "total_after", "total_invalidated",
+        "passes_with_changes", "unique_pass_names",
         "total_instructions_before", "total_instructions_after",
         "total_bbs_before", "total_bbs_after",
         "codegen_asm_lines_before", "codegen_asm_lines_after",
-        "codegen_asm_bytes_before", "codegen_asm_bytes_after",
-        "asm_lines_before", "asm_lines_after", "asm_bytes_before",
-        "asm_bytes_after", "optnone_function_count"
+        "codegen_asm_bytes_before", "codegen_asm_bytes_after"
     };
-    static const std::set<std::string> boolKeys = {
-        "snapshot_enabled", "has_changes", "ir_changed", "invalidated",
-        "optnone_detected", "optnone_stripped"
-    };
-    std::string line;
-    unsigned lineNo = 0;
-    while (std::getline(file, line)) {
-        lineNo++;
-        auto q1 = line.find('"');
-        if (q1 == std::string::npos) continue;
-        auto q2 = line.find('"', q1 + 1);
-        if (q2 == std::string::npos) continue;
-        std::string key = line.substr(q1 + 1, q2 - q1 - 1);
-        auto colon = line.find(':', q2 + 1);
-        if (colon == std::string::npos) continue;
-        auto valueStart = line.find_first_not_of(" \t", colon + 1);
-        if (valueStart == std::string::npos) continue;
-        auto valueEnd = line.find_first_of(",\r\n}", valueStart);
-        std::string value = trimWS(line.substr(
-            valueStart, valueEnd == std::string::npos
-                ? std::string::npos : valueEnd - valueStart));
-        bool valid = true;
-        if (countKeys.count(key)) {
-            try {
-                size_t used = 0;
-                long long parsed = std::stoll(value, &used);
-                valid = used == value.size() && parsed >= 0;
-            } catch (...) {
-                valid = false;
-            }
-        } else if (boolKeys.count(key)) {
-            valid = value == "true" || value == "false";
-        } else if (key == "event_type") {
-            std::string parsed = parseJsonString(line, key);
-            valid = parsed == "before" || parsed == "after" ||
-                    parsed == "invalidated";
-        } else if (key == "pass_type") {
-            std::string parsed = parseJsonString(line, key);
-            valid = parsed == "analysis" || parsed == "transformation" ||
-                    parsed == "adaptor" || parsed == "pipeline" ||
-                    parsed == "unknown";
-        } else if (key == "ir_kind") {
-            std::string parsed = parseJsonString(line, key);
-            valid = parsed == "Module" || parsed == "Function" ||
-                    parsed == "Loop" || parsed == "CGSCC" ||
-                    parsed == "Unknown";
-        }
-        if (!valid) {
-            errs() << "ERROR: invalid value for '" << key << "' in "
-                   << path << ":" << lineNo << "\n";
+    for (StringRef key : summaryCounts) {
+        if (!requireCount(*summary, key, "summary."))
             return false;
+    }
+    if (const json::Value *value = summary->get("passes_with_ir_changes")) {
+        auto integer = value->getAsInteger();
+        if (!integer || *integer < 0)
+            return fail("summary.passes_with_ir_changes",
+                        "must be a non-negative integer");
+    }
+    if (!validateNullableString(*summary, "codegen_error_before", "summary.") ||
+        !validateNullableString(*summary, "codegen_error_after", "summary."))
+        return false;
+
+    auto *targets = summary->getObject("codegen_targets");
+    if (!targets)
+        return fail("summary.codegen_targets", "must be an object");
+    for (const auto &entry : *targets) {
+        std::string prefix = "summary.codegen_targets[" +
+                             entry.first.str() + "].";
+        auto *target = entry.second.getAsObject();
+        if (!target)
+            return fail(prefix.substr(0, prefix.size() - 1),
+                        "must be an object");
+        static const std::vector<StringRef> targetCounts = {
+            "asm_lines_before", "asm_lines_after",
+            "asm_bytes_before", "asm_bytes_after"
+        };
+        for (StringRef key : targetCounts) {
+            if (!requireCount(*target, key, prefix))
+                return false;
+        }
+        if (!validateNullableString(*target, "error", prefix))
+            return false;
+    }
+
+    auto *events = root->getArray("events");
+    if (!events)
+        return fail("events", "must be an array");
+    static const std::set<StringRef> eventTypes = {
+        "before", "after", "invalidated"
+    };
+    static const std::set<StringRef> passTypes = {
+        "analysis", "transformation", "adaptor", "pipeline", "unknown"
+    };
+    static const std::set<StringRef> irKinds = {
+        "Module", "Function", "Loop", "CGSCC", "Unknown"
+    };
+    static const std::vector<StringRef> metrics = {
+        "instruction_count", "basic_block_count", "load_count",
+        "store_count", "branch_count", "phi_count"
+    };
+    for (size_t index = 0; index < events->size(); index++) {
+        std::string prefix = "events[" + std::to_string(index) + "].";
+        auto *event = (*events)[index].getAsObject();
+        if (!event)
+            return fail(prefix.substr(0, prefix.size() - 1),
+                        "must be an object");
+        auto eventType = event->getString("event_type");
+        if (!eventType || !eventTypes.count(*eventType))
+            return fail(prefix + "event_type", "is invalid");
+        if (!requireString(*event, "pass_name", prefix, false) ||
+            !requireString(*event, "ir_name", prefix, false) ||
+            !requireCount(*event, "id", prefix) ||
+            !requireCount(*event, "depth", prefix))
+            return false;
+        if (auto passType = event->getString("pass_type");
+            event->get("pass_type") && (!passType || !passTypes.count(*passType)))
+            return fail(prefix + "pass_type", "is invalid");
+        auto irKind = event->getString("ir_kind");
+        if (!irKind || !irKinds.count(*irKind))
+            return fail(prefix + "ir_kind", "is invalid");
+
+        std::vector<StringRef> sides =
+            *eventType == "after"
+                ? std::vector<StringRef>{"metrics_before", "metrics_after"}
+                : std::vector<StringRef>{"metrics"};
+        for (StringRef side : sides) {
+            auto *metricObject = event->getObject(side);
+            if (!metricObject)
+                return fail(prefix + side.str(), "must be an object");
+            for (StringRef key : metrics) {
+                if (!requireCount(*metricObject, key,
+                                  prefix + side.str() + "."))
+                    return false;
+            }
+        }
+        if (*eventType == "after") {
+            if (!event->getBoolean("has_changes"))
+                return fail(prefix + "has_changes", "must be boolean");
+            if (const json::Value *value = event->get("ir_changed");
+                value && !value->getAsBoolean())
+                return fail(prefix + "ir_changed", "must be boolean");
+            const json::Value *before = event->get("ir_before");
+            const json::Value *after = event->get("ir_after");
+            if (before || after) {
+                bool validBefore = before &&
+                    (before->getAsNull() || before->getAsString());
+                bool validAfter = after &&
+                    (after->getAsNull() || after->getAsString());
+                bool paired = before && after &&
+                    (bool)before->getAsString() == (bool)after->getAsString();
+                if (!validBefore || !validAfter || !paired)
+                    return fail(prefix + "snapshot pair",
+                                "must contain two strings or two nulls");
+            }
         }
     }
     return true;
@@ -253,6 +357,15 @@ static std::string parseFirstQuoted(const std::string &line) {
     return line.substr(q1 + 1, q2 - q1 - 1);
 }
 
+static bool parseJsonNull(const std::string &line, const std::string &key) {
+    auto keyPos = line.find("\"" + key + "\"");
+    if (keyPos == std::string::npos) return false;
+    auto colon = line.find(':', keyPos + key.size() + 2);
+    if (colon == std::string::npos) return false;
+    auto value = line.find_first_not_of(" \t", colon + 1);
+    return value != std::string::npos && line.compare(value, 4, "null") == 0;
+}
+
 static long long pctDelta(long long old_val, long long new_val) {
     if (old_val == 0) return (new_val == 0) ? 0 : 100;
     return ((new_val - old_val) * 100) / old_val;
@@ -276,6 +389,7 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
     long long baseBbBefore = 0, baseBbAfter = 0;
     long long baseCgLinesBefore = 0, baseCgLinesAfter = 0;
     long long baseCgBytesBefore = 0, baseCgBytesAfter = 0;
+    bool baseCgBeforeAvailable = false, baseCgAfterAvailable = false;
     long long baseTotalEvents = 0, baseTotalBefore = 0, baseTotalAfter = 0;
     long long baseTotalInv = 0, basePassChg = 0, basePassIr = 0, baseUnique = 0;
     bool baseSawPassIr = false;
@@ -315,6 +429,12 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                     baseCgBytesBefore = parseJsonInt(line, "codegen_asm_bytes_before");
                 if (line.find("\"codegen_asm_bytes_after\"") != std::string::npos)
                     baseCgBytesAfter = parseJsonInt(line, "codegen_asm_bytes_after");
+                if (line.find("\"codegen_error_before\"") != std::string::npos)
+                    baseCgBeforeAvailable =
+                        parseJsonNull(line, "codegen_error_before");
+                if (line.find("\"codegen_error_after\"") != std::string::npos)
+                    baseCgAfterAvailable =
+                        parseJsonNull(line, "codegen_error_after");
                 if (line.find("\"total_events\"") != std::string::npos)
                     baseTotalEvents = parseJsonInt(line, "total_events");
                 if (line.find("\"total_before\"") != std::string::npos)
@@ -517,6 +637,7 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
     long long currBbBefore = 0, currBbAfter = 0;
     long long currCgLinesBefore = 0, currCgLinesAfter = 0;
     long long currCgBytesBefore = 0, currCgBytesAfter = 0;
+    bool currCgBeforeAvailable = false, currCgAfterAvailable = false;
     long long currTotalEvents = 0, currTotalBefore = 0, currTotalAfter = 0;
     long long currTotalInv = 0, currPassChg = 0, currPassIr = 0, currUnique = 0;
     bool currSawPassIr = false;
@@ -554,6 +675,12 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                     currCgBytesBefore = parseJsonInt(line, "codegen_asm_bytes_before");
                 if (line.find("\"codegen_asm_bytes_after\"") != std::string::npos)
                     currCgBytesAfter = parseJsonInt(line, "codegen_asm_bytes_after");
+                if (line.find("\"codegen_error_before\"") != std::string::npos)
+                    currCgBeforeAvailable =
+                        parseJsonNull(line, "codegen_error_before");
+                if (line.find("\"codegen_error_after\"") != std::string::npos)
+                    currCgAfterAvailable =
+                        parseJsonNull(line, "codegen_error_after");
                 if (line.find("\"total_events\"") != std::string::npos)
                     currTotalEvents = parseJsonInt(line, "total_events");
                 if (line.find("\"total_before\"") != std::string::npos)
@@ -902,7 +1029,7 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
     }
 
     // 2. Codegen regression/improvement
-    {
+    if (baseCgAfterAvailable && currCgAfterAvailable) {
         auto [avail, cp] = pctDeltaF(baseCgLinesAfter, currCgLinesAfter);
         if (avail) {
             if (cp > 5) {
@@ -1220,10 +1347,12 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
         }
     }
     {
-        auto [avail, cp] = pctDeltaF(baseCgLinesAfter, currCgLinesAfter);
-        if (avail) {
-            covCg = true;
-            compCg = round1(std::min(1.0, std::max(0.0, cp) / 50.0) * 30.0);
+        if (baseCgAfterAvailable && currCgAfterAvailable) {
+            auto [avail, cp] = pctDeltaF(baseCgLinesAfter, currCgLinesAfter);
+            if (avail) {
+                covCg = true;
+                compCg = round1(std::min(1.0, std::max(0.0, cp) / 50.0) * 30.0);
+            }
         }
     }
     {
@@ -1310,10 +1439,26 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
         os << ",\"total_instructions_after\":" << (currInstrAfter - baseInstrAfter);
         os << ",\"total_bbs_before\":" << (currBbBefore - baseBbBefore);
         os << ",\"total_bbs_after\":" << (currBbAfter - baseBbAfter);
-        os << ",\"codegen_asm_lines_before\":" << (currCgLinesBefore - baseCgLinesBefore);
-        os << ",\"codegen_asm_lines_after\":" << (currCgLinesAfter - baseCgLinesAfter);
-        os << ",\"codegen_asm_bytes_before\":" << (currCgBytesBefore - baseCgBytesBefore);
-        os << ",\"codegen_asm_bytes_after\":" << (currCgBytesAfter - baseCgBytesAfter);
+        os << ",\"codegen_asm_lines_before\":";
+        if (baseCgBeforeAvailable && currCgBeforeAvailable)
+            os << (currCgLinesBefore - baseCgLinesBefore);
+        else
+            os << "null";
+        os << ",\"codegen_asm_lines_after\":";
+        if (baseCgAfterAvailable && currCgAfterAvailable)
+            os << (currCgLinesAfter - baseCgLinesAfter);
+        else
+            os << "null";
+        os << ",\"codegen_asm_bytes_before\":";
+        if (baseCgBeforeAvailable && currCgBeforeAvailable)
+            os << (currCgBytesBefore - baseCgBytesBefore);
+        else
+            os << "null";
+        os << ",\"codegen_asm_bytes_after\":";
+        if (baseCgAfterAvailable && currCgAfterAvailable)
+            os << (currCgBytesAfter - baseCgBytesAfter);
+        else
+            os << "null";
         long long baseRed = baseInstrBefore - baseInstrAfter;
         long long currRed = currInstrBefore - currInstrAfter;
         os << ",\"instruction_reduction_delta\":" << (currRed - baseRed);
@@ -1321,9 +1466,25 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
         os << ",\"curr_instruction_reduction_pct\":" << fmtPct(pctDeltaF(currInstrBefore, currInstrAfter).second);
         long long baseCgRed = baseCgLinesBefore - baseCgLinesAfter;
         long long currCgRed = currCgLinesBefore - currCgLinesAfter;
-        os << ",\"codegen_reduction_delta\":" << (currCgRed - baseCgRed);
-        os << ",\"codegen_reduction_pct\":" << fmtPct(pctDeltaF(baseCgLinesBefore, baseCgLinesAfter).second);
-        os << ",\"curr_codegen_reduction_pct\":" << fmtPct(pctDeltaF(currCgLinesBefore, currCgLinesAfter).second);
+        bool baseCgReductionAvailable =
+            baseCgBeforeAvailable && baseCgAfterAvailable;
+        bool currCgReductionAvailable =
+            currCgBeforeAvailable && currCgAfterAvailable;
+        os << ",\"codegen_reduction_delta\":";
+        if (baseCgReductionAvailable && currCgReductionAvailable)
+            os << (currCgRed - baseCgRed);
+        else
+            os << "null";
+        os << ",\"codegen_reduction_pct\":";
+        if (baseCgReductionAvailable)
+            os << fmtPct(pctDeltaF(baseCgLinesBefore, baseCgLinesAfter).second);
+        else
+            os << "null";
+        os << ",\"curr_codegen_reduction_pct\":";
+        if (currCgReductionAvailable)
+            os << fmtPct(pctDeltaF(currCgLinesBefore, currCgLinesAfter).second);
+        else
+            os << "null";
         os << ",\"pipeline_changed\":" << (basePipeline != currPipeline ? "true" : "false");
         os << ",\"base_pipeline\":\"" << jsonEscape(basePipeline) << "\"";
         os << ",\"curr_pipeline\":\"" << jsonEscape(currPipeline) << "\"";
@@ -1473,7 +1634,11 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
         errs() << "  Instruction reduction: " << baseRed << " -> " << currRed
                << " (delta: " << (redDelta >= 0 ? "+" : "") << redDelta << ")\n";
     }
-    errs() << "  Codegen lines (after): " << baseCgLinesAfter << " -> " << currCgLinesAfter << "\n";
+    errs() << "  Codegen lines (after): ";
+    if (baseCgAfterAvailable && currCgAfterAvailable)
+        errs() << baseCgLinesAfter << " -> " << currCgLinesAfter << "\n";
+    else
+        errs() << "unavailable\n";
     if (!btMap.empty() || !ctMap.empty()) {
         errs() << "  Per-target codegen (lines after):\n";
         std::set<std::string> allT;

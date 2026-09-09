@@ -718,6 +718,9 @@ function validateHistory(d){
     'codegen_asm_lines_before','codegen_asm_lines_after',
     'codegen_asm_bytes_before','codegen_asm_bytes_after','optnone_function_count'];
   for(const k of optionalSummaryNumbers)if(d.summary[k]!=null&&!isCount(d.summary[k]))errors.push('summary.'+k+' must be a non-negative integer or null');
+  for(const k of ['codegen_error_before','codegen_error_after']){
+    if(!(k in d.summary)||(d.summary[k]!=null&&typeof d.summary[k]!=='string'))errors.push('summary.'+k+' must be a string or null');
+  }
   const targets=d.summary.codegen_targets;
   if(targets!=null){
     if(typeof targets!=='object'||Array.isArray(targets))errors.push('summary.codegen_targets must be an object or null');
@@ -2210,6 +2213,7 @@ function compareSort(field){
 
 function renderCompareStat(label,val,invert){
   if(invert===undefined) invert=false;
+  if(val==null)return '<div class="compare-stat"><div class="compare-stat-label">'+esc(label)+'</div><div class="compare-stat-value neutral">N/A</div><div class="compare-stat-delta">measurement unavailable</div></div>';
   var cls='neutral';
   if(val>0) cls=invert?'regressed':'improved';
   else if(val<0) cls=invert?'improved':'regressed';

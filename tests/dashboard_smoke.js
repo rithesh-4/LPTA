@@ -34,7 +34,7 @@ function mkEl() {
         innerHTML: "", textContent: "", value: "", disabled: false,
         style: {}, dataset: {},
         classList: { add() {}, remove() {}, contains: () => false },
-        addEventListener() {}, appendChild() {}, removeChild() {},
+        addEventListener() {}, appendChild() {}, removeChild() {}, remove() {},
         prepend() {},
         click() {}, focus() {}, scrollIntoView() {},
         getContext: () => mkCtx(),

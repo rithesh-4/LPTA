@@ -114,7 +114,8 @@ def validate_history(history, label="history"):
 
     for key in (
         "total_events", "total_before", "total_after", "total_invalidated",
-        "passes_with_changes", "total_instructions_before",
+        "passes_with_changes", "unique_pass_names",
+        "total_instructions_before",
         "total_instructions_after", "total_bbs_before", "total_bbs_after",
         "codegen_asm_lines_before", "codegen_asm_lines_after",
         "codegen_asm_bytes_before", "codegen_asm_bytes_after",
@@ -124,7 +125,13 @@ def validate_history(history, label="history"):
     if summary.get("passes_with_ir_changes") is not None and \
             not _count(summary["passes_with_ir_changes"]):
         errors.append(f"{label}.summary.passes_with_ir_changes must be a non-negative integer")
-    targets = summary.get("codegen_targets", {})
+    for key in ("codegen_error_before", "codegen_error_after"):
+        if key not in summary or (
+                summary[key] is not None and
+                not isinstance(summary[key], str)):
+            errors.append(
+                f"{label}.summary.{key} must be a string or null")
+    targets = summary.get("codegen_targets")
     if not isinstance(targets, dict):
         errors.append(f"{label}.summary.codegen_targets must be an object")
     else:
@@ -134,10 +141,9 @@ def validate_history(history, label="history"):
                 errors.append(f"{path} must be an object")
                 continue
             error = result.get("error")
-            if error is not None:
-                if not isinstance(error, str):
-                    errors.append(f"{path}.error must be a string or null")
-                continue
+            if "error" not in result or (
+                    error is not None and not isinstance(error, str)):
+                errors.append(f"{path}.error must be a string or null")
             for key in ("asm_lines_before", "asm_lines_after",
                         "asm_bytes_before", "asm_bytes_after"):
                 if not _count(result.get(key)):
@@ -304,6 +310,27 @@ def compare_histories(base, curr, allow_different_input=False):
         """Legacy wrapper: unavailable percentages report 0.0."""
         return pct(old, new)[1]
 
+    base_cg_before_available = sb["codegen_error_before"] is None
+    base_cg_after_available = sb["codegen_error_after"] is None
+    curr_cg_before_available = sc["codegen_error_before"] is None
+    curr_cg_after_available = sc["codegen_error_after"] is None
+    codegen_before_comparable = (
+        base_cg_before_available and curr_cg_before_available
+    )
+    codegen_after_comparable = (
+        base_cg_after_available and curr_cg_after_available
+    )
+    base_codegen_reduction_available = (
+        base_cg_before_available and base_cg_after_available
+    )
+    curr_codegen_reduction_available = (
+        curr_cg_before_available and curr_cg_after_available
+    )
+    codegen_reduction_comparable = (
+        base_codegen_reduction_available and
+        curr_codegen_reduction_available
+    )
+
     summary_diff = {
         "total_events": diff(sb.get("total_events", 0), sc.get("total_events", 0)),
         "total_before": diff(sb.get("total_before", 0), sc.get("total_before", 0)),
@@ -316,10 +343,22 @@ def compare_histories(base, curr, allow_different_input=False):
         "total_instructions_after": diff(sb.get("total_instructions_after", 0), sc.get("total_instructions_after", 0)),
         "total_bbs_before": diff(sb.get("total_bbs_before", 0), sc.get("total_bbs_before", 0)),
         "total_bbs_after": diff(sb.get("total_bbs_after", 0), sc.get("total_bbs_after", 0)),
-        "codegen_asm_lines_before": diff(sb.get("codegen_asm_lines_before", 0), sc.get("codegen_asm_lines_before", 0)),
-        "codegen_asm_lines_after": diff(sb.get("codegen_asm_lines_after", 0), sc.get("codegen_asm_lines_after", 0)),
-        "codegen_asm_bytes_before": diff(sb.get("codegen_asm_bytes_before", 0), sc.get("codegen_asm_bytes_before", 0)),
-        "codegen_asm_bytes_after": diff(sb.get("codegen_asm_bytes_after", 0), sc.get("codegen_asm_bytes_after", 0)),
+        "codegen_asm_lines_before":
+            diff(sb["codegen_asm_lines_before"],
+                 sc["codegen_asm_lines_before"])
+            if codegen_before_comparable else None,
+        "codegen_asm_lines_after":
+            diff(sb["codegen_asm_lines_after"],
+                 sc["codegen_asm_lines_after"])
+            if codegen_after_comparable else None,
+        "codegen_asm_bytes_before":
+            diff(sb["codegen_asm_bytes_before"],
+                 sc["codegen_asm_bytes_before"])
+            if codegen_before_comparable else None,
+        "codegen_asm_bytes_after":
+            diff(sb["codegen_asm_bytes_after"],
+                 sc["codegen_asm_bytes_after"])
+            if codegen_after_comparable else None,
     }
 
     # Instruction/codegen reduction deltas and efficiency
@@ -333,11 +372,20 @@ def compare_histories(base, curr, allow_different_input=False):
 
     base_cg_red = sb.get("codegen_asm_lines_before", 0) - sb.get("codegen_asm_lines_after", 0)
     curr_cg_red = sc.get("codegen_asm_lines_before", 0) - sc.get("codegen_asm_lines_after", 0)
-    summary_diff["codegen_reduction_delta"] = curr_cg_red - base_cg_red
-    summary_diff["codegen_reduction_pct"] = pct_delta(
-        sb.get("codegen_asm_lines_before", 0), sb.get("codegen_asm_lines_after", 0))
-    summary_diff["curr_codegen_reduction_pct"] = pct_delta(
-        sc.get("codegen_asm_lines_before", 0), sc.get("codegen_asm_lines_after", 0))
+    summary_diff["codegen_reduction_delta"] = (
+        curr_cg_red - base_cg_red
+        if codegen_reduction_comparable else None
+    )
+    summary_diff["codegen_reduction_pct"] = (
+        pct_delta(sb["codegen_asm_lines_before"],
+                  sb["codegen_asm_lines_after"])
+        if base_codegen_reduction_available else None
+    )
+    summary_diff["curr_codegen_reduction_pct"] = (
+        pct_delta(sc["codegen_asm_lines_before"],
+                  sc["codegen_asm_lines_after"])
+        if curr_codegen_reduction_available else None
+    )
 
     # Pipeline change detection
     base_pipeline = base.get("pipeline", "?")
@@ -561,7 +609,10 @@ def compare_histories(base, curr, allow_different_input=False):
     # Codegen regression/improvement
     base_cg_after = bsum.get("codegen_asm_lines_after", 0)
     curr_cg_after = csum.get("codegen_asm_lines_after", 0)
-    cg_avail, cg_pct = pct(base_cg_after, curr_cg_after)
+    cg_avail, cg_pct = (
+        pct(base_cg_after, curr_cg_after)
+        if codegen_after_comparable else (False, 0.0)
+    )
     if cg_avail:
         if cg_pct > 5:
             regressions.append(finding(
@@ -577,7 +628,7 @@ def compare_histories(base, curr, allow_different_input=False):
                 f"({base_cg_after} -> {curr_cg_after})",
                 metric="codegen", delta=curr_cg_after - base_cg_after,
                 pct=cg_pct))
-    elif curr_cg_after > 50:
+    elif codegen_after_comparable and curr_cg_after > 50:
         regressions.append(finding(
             "codegen_regression", "high",
             f"Codegen assembly lines increased by {curr_cg_after} vs baseline "
@@ -715,7 +766,10 @@ def compare_histories(base, curr, allow_different_input=False):
     if instr_avail:
         cov["instructions"] = True
         comp["instructions"] = round1(min(1.0, max(0.0, instr_pct_for_score) / 50.0) * 40.0)
-    cg_avail, cg_pct_for_score = pct(base_cg_after, curr_cg_after)
+    cg_avail, cg_pct_for_score = (
+        pct(base_cg_after, curr_cg_after)
+        if codegen_after_comparable else (False, 0.0)
+    )
     if cg_avail:
         cov["codegen"] = True
         comp["codegen"] = round1(min(1.0, max(0.0, cg_pct_for_score) / 50.0) * 30.0)
