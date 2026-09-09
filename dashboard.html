@@ -709,22 +709,44 @@ function renderOverview(){
 
 // ===== NORMALIZE / INTEGRITY =====
 function normalizeHistory(d){
-  if(!d||!d.summary)return{mismatch:false,calculated:{}};
+  if(!d||!d.summary)return{mismatch:false,calculated:{},warnings:[],errors:['missing summary']};
   const s=d.summary;
   const evts=d.events||[];
+  const warnings=[],errors=[];
+  // Root-level checks
+  if(typeof d.module_name!=='string')errors.push('module_name must be string');
+  if(typeof d.pipeline!=='string')errors.push('pipeline must be string');
+  if(!Array.isArray(evts))errors.push('events must be array');
+  // Summary field type checks
+  for(const k of ['total_before','total_after','total_invalidated','passes_with_changes','passes_with_ir_changes','unique_pass_names']){
+    if(s[k]!=null&&typeof s[k]!=='number')warnings.push('summary.'+k+' should be number');
+  }
+  // Event-count recomputation (exact, schema-2 semantics)
   let totalBefore=0,totalAfter=0,changed=0,irChanged=0,invalidated=0;
-  for(const e of evts){
+  const validEventTypes=new Set(['before','after','invalidated']);
+  const validPassTypes=new Set(['adaptor','pipeline','analysis','transformation']);
+  const limit=Math.min(evts.length,500);
+  for(let i=0;i<evts.length;i++){
+    const e=evts[i];
     if(e.event_type==='before')totalBefore++;
     else if(e.event_type==='after'){
       totalAfter++;
       if(e.has_changes)changed++;
       if(e.has_changes||e.ir_changed)irChanged++;
     }else if(e.event_type==='invalidated')invalidated++;
+    // Per-event validation (first 500 for perf)
+    if(i<limit){
+      if(typeof e.pass_name!=='string')errors.push('events['+i+'].pass_name must be string');
+      if(!validEventTypes.has(e.event_type))errors.push('events['+i+'].event_type invalid: '+e.event_type);
+      if(!validPassTypes.has(e.pass_type))warnings.push('events['+i+'].pass_type unknown: '+e.pass_type);
+      if(e.event_type==='after'){
+        if(typeof e.has_changes!=='boolean')errors.push('events['+i+'].has_changes must be boolean');
+        if(typeof e.ir_changed!=='boolean')errors.push('events['+i+'].ir_changed must be boolean');
+        if(e.ir_before!=null&&typeof e.ir_before!=='string')warnings.push('events['+i+'].ir_before should be string');
+        if(e.ir_after!=null&&typeof e.ir_after!=='string')warnings.push('events['+i+'].ir_after should be string');
+      }
+    }
   }
-  // Only event-count fields are recomputed here (exact, schema-2 semantics).
-  // Module instruction/BB totals use the writer's authoritative first/last
-  // module-observation selection and are not re-derivable cheaply in the
-  // browser, so they are intentionally not validated.
   const calc={total_before:totalBefore,total_after:totalAfter,
     passes_with_changes:changed,passes_with_ir_changes:irChanged,
     total_invalidated:invalidated};
@@ -732,17 +754,20 @@ function normalizeHistory(d){
   for(const k of Object.keys(calc)){
     if(s[k]!==undefined&&s[k]!==calc[k])mismatch=true;
   }
-  return{mismatch,calculated:calc};
+  return{mismatch,calculated:calc,warnings,errors};
 }
 function showIntegrityBanner(norm){
-  if(!norm||!norm.mismatch)return;
+  if(!norm||(!norm.mismatch&&!norm.warnings?.length))return;
   let el=document.getElementById('integrity-banner');
   if(!el){
     el=document.createElement('div');el.id='integrity-banner';
     const ov=document.getElementById('overview-cards');
     if(ov&&ov.parentNode)ov.parentNode.insertBefore(el,ov);
   }
-  el.innerHTML='<div style="background:var(--red-soft);border:1px solid rgba(248,113,113,.3);border-radius:10px;padding:12px 18px;margin-bottom:16px;font-size:12px;color:var(--red)"><strong>⚠ integrity notice:</strong> Summary totals do not match event counts. The report may have been edited or generated with an older version.</div>';
+  let html='';
+  if(norm.mismatch)html+='<div style="background:var(--red-soft);border:1px solid rgba(248,113,113,.3);border-radius:10px;padding:12px 18px;margin-bottom:16px;font-size:12px;color:var(--red)"><strong>⚠ integrity notice:</strong> Summary totals do not match event counts. The report may have been edited or generated with an older version.</div>';
+  if(norm.warnings?.length)html+='<div style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:10px;padding:12px 18px;margin-bottom:16px;font-size:12px;color:#92400e"><strong>⚠ validation warnings:</strong> '+norm.warnings.slice(0,5).map(w=>esc(w)).join('; ')+(norm.warnings.length>5?' ('+norm.warnings.length+' total)':'')+'</div>';
+  el.innerHTML=html;
 }
 
 function renderTopPassesCompact(){
