@@ -246,6 +246,9 @@ Outputs:
 ### 6. Run Tests
 
 ```bash
+# Fast gate (unit + proof + cross-validation, seconds)
+ctest --test-dir build
+
 # Full test suite (slow, includes 300-iteration fuzz)
 bash tests/run_all_tests.sh build/
 
@@ -442,6 +445,16 @@ Full IR text is expensive to capture for every pass. LPTA records metrics for ev
 
 ### Codegen via llc
 Object size measurement uses `llc` to compile before/after IR to assembly, then counts lines and bytes. This gives a concrete measure of how optimization affected final codegen **size** — a useful proxy when investigating codegen, not a runtime benchmark.
+
+### Performance characteristics
+Tracing cost scales with pass executions × IR size (every pass is measured before/after). Measured on this machine:
+| Input | Flags | Time | `history.json` |
+|---|---|---|---|
+| `real_test.ll` (368 instr) | `-O2 --snapshots` | ~3.4 s | ~2 MB |
+| synthetic 2000 fns (26k instr) | `-O2` | ~21 s | ~420 MB (404k events) |
+| same | `-O2 --no-ir-hash` | ~14 s | same volume, no IR-change signal |
+
+`--no-ir-hash` is the documented perf mode: it skips IR serialization/hashing (counter metrics, pairing, snapshots and determinism are unaffected; `ir_changed` stays false). Event volume itself is inherent to per-pass tracing — for huge modules, analyze hot functions individually instead.
 
 ### Supported IR granularities
 LPTA meters three IR units — **Module**, **Function**, **Loop** — with full counters, opcode histograms, and IR hashing. Passes operating on other units (notably CGSCC-level passes over `LazyCallGraph::SCC`, plus analysis-only passes) are still recorded as events for ordering/nesting, but carry zero metrics and `ir_changed: false` — there is no stable per-unit serialization to hash. The tool prints one console warning per such pass. Full CGSCC metering is future work.

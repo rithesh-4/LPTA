@@ -3,6 +3,7 @@
 // Global variable definitions (originally in main.cpp)
 std::string g_output_dir = "report";
 bool g_snapshots = false;
+bool g_no_ir_hash = false;
 std::string g_module_name;
 std::string g_opt_level = "O2";
 llvm::OptimizationLevel g_opt = llvm::OptimizationLevel::O2;

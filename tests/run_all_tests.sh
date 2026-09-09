@@ -112,6 +112,15 @@ head -5 test.ll > "$TMP_DIR/t_truncated.ll"
 "$EXE" --compare >/dev/null 2>&1
 [ $? -eq 1 ] && pass "--compare without args -> RC=1" || fail "--compare without args -> RC=$?"
 
+# Test: --no-ir-hash perf mode keeps counters, drops the IR signal
+"$EXE" test.ll "$TMP_DIR/t_nohash" -O2 --no-ir-hash >/dev/null 2>&1
+[ $? -eq 0 ] && pass "Valid --no-ir-hash -> RC=0" || fail "Valid --no-ir-hash -> RC=$?"
+if grep -q '"ir_changed": true' "$TMP_DIR/t_nohash/history.json" 2>/dev/null; then
+    fail "--no-ir-hash still reported ir_changed"
+else
+    pass "--no-ir-hash reports no ir_changed"
+fi
+
 # Test: --version prints LLVM version
 if "$EXE" --version 2>/dev/null | grep -qE "[0-9]+\.[0-9]+"; then
     pass "--version reports LLVM version"

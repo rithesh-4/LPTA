@@ -830,7 +830,7 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file] [--]\n       lpta_test --compare <base.json> <curr.json>\n";
+        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file] [--no-ir-hash] [--]\n       lpta_test --compare <base.json> <curr.json>\n";
         return 1;
     }
 
@@ -885,6 +885,8 @@ int main(int argc, char **argv) {
         }
         if (!end_of_flags && arg == "--snapshots") {
             g_snapshots = true;
+        } else if (!end_of_flags && arg == "--no-ir-hash") {
+            g_no_ir_hash = true;
         } else if (!end_of_flags && arg.rfind("--targets=", 0) == 0) {
             std::string targets_arg = arg.substr(10); // skip "--targets="
             auto trimCopy = [](std::string s) -> std::string {
@@ -986,7 +988,7 @@ int main(int argc, char **argv) {
             g_opt = OptimizationLevel::Oz; g_opt_level = "Oz";
         } else if (!end_of_flags && !arg.empty() && arg[0] == '-') {
             errs() << "ERROR: unknown option '" << arg << "'\n";
-            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file] [--]\n       lpta_test --compare <base.json> <curr.json>\n";
+            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file] [--no-ir-hash] [--]\n       lpta_test --compare <base.json> <curr.json>\n";
             return 1;
         } else if (input_file.empty()) {
             input_file = arg;
@@ -995,13 +997,13 @@ int main(int argc, char **argv) {
             output_dir_set = true;
         } else {
             errs() << "ERROR: unexpected argument '" << arg << "'\n";
-            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file] [--]\n       lpta_test --compare <base.json> <curr.json>\n";
+            errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file] [--no-ir-hash] [--]\n       lpta_test --compare <base.json> <curr.json>\n";
             return 1;
         }
     }
 
     if (input_file.empty()) {
-        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file] [--]\n       lpta_test --compare <base.json> <curr.json>\n";
+        errs() << "Usage: lpta_test <input.ll> [output_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file] [--no-ir-hash] [--]\n       lpta_test --compare <base.json> <curr.json>\n";
         return 1;
     }
 
@@ -1161,9 +1163,12 @@ int main(int argc, char **argv) {
             frame.event_id = current_event_id;
             // IR-change hash: serialize once per pass; reuse the text for the
             // snapshot when this pass is allowlisted so hashing costs no
-            // extra serialization there.
-            std::string snap = serializeIR(IR);
-            frame.before_hash = hashIRText(snap);
+            // extra serialization there. --no-ir-hash skips serialization
+            // entirely unless snapshots need the text (perf mode: counters
+            // and pairing still work, ir_changed stays false).
+            std::string snap;
+            if (shouldSnapshot(PassID) || !g_no_ir_hash) snap = serializeIR(IR);
+            frame.before_hash = g_no_ir_hash ? 0 : hashIRText(snap);
             // Only capture IR text if snapshots enabled for this pass.
             // Cap at kMaxSnapshotBytes per snapshot to avoid unbounded memory
             // growth on large modules. If BEFORE exceeds the cap we record
@@ -1266,7 +1271,9 @@ int main(int argc, char **argv) {
             uint64_t after_hash;
             if (shouldSnapshot(PassID)) {
                 afterSnap = serializeIR(IR);
-                after_hash = hashIRText(afterSnap);
+                after_hash = g_no_ir_hash ? 0 : hashIRText(afterSnap);
+            } else if (g_no_ir_hash) {
+                after_hash = 0;
             } else {
                 after_hash = hashIRUnit(IR);
             }
@@ -1502,6 +1509,8 @@ int main(int argc, char **argv) {
     errs() << "Module: " << M->getName() << "\n";
     errs() << "Pipeline: -" << g_opt_level << "\n";
     errs() << "Output: " << g_output_dir << "\n";
+    if (g_no_ir_hash)
+        errs() << "IR-hash detection: OFF (--no-ir-hash perf mode; ir_changed stays false)\n";
     errs() << "=================================\n\n";
 
     // Save initial IR before optimization (secondary artifact: warn, don't

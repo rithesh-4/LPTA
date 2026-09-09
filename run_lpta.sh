@@ -23,6 +23,7 @@ Usage: bash run_lpta.sh [input.ll|input.c] [report_dir] [-O0|-O1|-O2|-O3|-Os|-Oz
   report_dir      Output directory (default: ./report or $REPORT_DIR)
   -O0..-Oz        Optimization level (default: -O2, last one wins)
   --snapshots     Save per-pass IR snapshots
+  --no-ir-hash    Perf mode: skip IR hashing (ir_changed stays false)
   --targets=...   common | triple,... | @file
   --              End of flags (following args are paths)
   --version       Build, then print the tool + LLVM version
@@ -90,6 +91,7 @@ INPUT=""
 REPORT_POS=""
 OPT_LEVEL=""
 SNAPSHOTS=""
+NO_IR_HASH=""
 TARGETS=""
 SHOW_VERSION=""
 END_OF_FLAGS=0
@@ -118,6 +120,7 @@ for arg in "$@"; do
     -h|--help) usage; exit 0 ;;
     --version|-version) SHOW_VERSION=1 ;;
     --snapshots) SNAPSHOTS="--snapshots" ;;
+    --no-ir-hash) NO_IR_HASH="--no-ir-hash" ;;
     --targets=*) TARGETS="$arg" ;;
     -O0|-O1|-O2|-O3|-Os|-Oz) OPT_LEVEL="$arg" ;;
     -*) echo "ERROR: unknown flag '$arg'" >&2; echo "" >&2; usage >&2; exit 1 ;;
@@ -250,6 +253,7 @@ mkdir -p "$REPORT_DIR"
 RUN_ARGS=("$INPUT" "$REPORT_DIR")
 [ -n "$OPT_LEVEL" ] && RUN_ARGS+=("$OPT_LEVEL")
 [ -n "$SNAPSHOTS" ] && RUN_ARGS+=("$SNAPSHOTS")
+[ -n "$NO_IR_HASH" ] && RUN_ARGS+=("$NO_IR_HASH")
 [ -n "$TARGETS" ] && RUN_ARGS+=("$TARGETS")
 RUN_LOG="$REPORT_DIR/lpta_run.log"
 set +e

@@ -22,8 +22,9 @@ Instrumentation tool (**not** upstream LLVM source): runs the `opt` pipeline on 
 - One-command: `bash run_lpta.sh input.ll` (env overrides: `BUILD_DIR`, `REPORT_DIR`; auto-detects `LLVM_DIR` via `llvm-config`)
 - Direct:
   ```
-  build/lpta_test.exe input.ll [report_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=common|triple,...|@file]
+  build/lpta_test.exe input.ll [report_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--no-ir-hash] [--targets=common|triple,...|@file]
   ```
+  `--no-ir-hash` skips IR serialization/hashing (perf mode: `ir_changed` stays false; counters/pairing/snapshots unaffected).
   Keep all four usage strings in `src/main.cpp` identical (plus `--compare` line). `--targets=@file` is line-delimited with `#` comments; comma list is trimmed. `--targets=common` expands to `x86_64`/`aarch64`/`riscv64` presets (see `inc/Codegen.h:41`).
 - Dashboard needs HTTP — `file://` fails (`fetch(history.json)`): `python serve_dashboard.py report -p 8080` or `cd report && python -m http.server 8080`
 - AI Insights (optional): `NVIDIA_API_KEY` must live in env or `.lpta_config.json` only — **never committed or embedded client-side**. Model/endpoint via `LPTA_AI_MODEL` / `LPTA_AI_BASE_URL` (any OpenAI-compatible endpoint). No key → panel shows setup hint, rest unaffected
