@@ -250,8 +250,12 @@ canvas.sparkline{width:100%;height:80px;display:block}
 
 /* Enhanced compare: new/removed pass indicators */
 .pass-status{display:inline-block;font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;margin-left:6px}
-.pass-status.new{background:rgba(99,102,241,.15);color:var(--accent-light)}
+.pass-status.new,.pass-status.added{background:rgba(99,102,241,.15);color:var(--accent-light)}
 .pass-status.removed{background:rgba(248,113,113,.15);color:var(--red)}
+.pass-status.present_in_both{display:none}
+.pass-status.newly_effectful{background:rgba(52,211,153,.12);color:var(--green)}
+.pass-status.no_longer_effectful{background:rgba(248,113,113,.15);color:var(--red)}
+.pass-status.unchanged_effect{display:none}
 .pass-status.unchanged{display:none}
 
 /* Enhanced compare: improvement items */
@@ -617,6 +621,11 @@ async function load(){
     // render "undefined" across the header/cards.
     if(typeof D.module_name!=='string'||!D.module_name)D.module_name='(unknown module)';
     if(typeof D.pipeline!=='string'||!D.pipeline)D.pipeline='?';
+    // Integrity boundary: recompute the event-count summary from the events
+    // array and flag discrepancies so hand-edited/foreign reports don't
+    // silently present fabricated totals.
+    const norm=normalizeHistory(D);
+    if(norm.mismatch)showIntegrityBanner(norm);
     eventMap=null;render();
   }
   catch(e){
@@ -656,10 +665,11 @@ function renderOverview(){
   const iPct=s.total_instructions_before?Math.round(iRed/s.total_instructions_before*100):null;
   const cgRed=(s.codegen_asm_lines_before||0)-(s.codegen_asm_lines_after||0);
   const cgPct=s.codegen_asm_lines_before?Math.round(cgRed/s.codegen_asm_lines_before*100):null;
-  const changedPasses=changedCount(s),totalAfter=s.total_after;
-  const efficiency=totalAfter?Math.round(changedPasses/totalAfter*100):0;
-  const totalIrChanged=(s.passes_with_ir_changes||changedPasses);
-  const rate=totalAfter&&totalIrChanged!=null?Math.round(totalIrChanged/totalAfter*100):null;
+  const anyIrPasses=changedCount(s);        // passes_with_ir_changes (or passes_with_changes for old schema)
+  const structPasses=s.passes_with_changes??anyIrPasses; // structural = passes_with_changes
+  const totalAfter=s.total_after;
+  const efficiency=totalAfter?Math.round(structPasses/totalAfter*100):0;
+  const rate=totalAfter&&anyIrPasses!=null?Math.round(anyIrPasses/totalAfter*100):null;
 
   const cardVal=(v,fmt)=>{
     if(v==null||Number.isNaN(v))return'N/A';
@@ -669,9 +679,9 @@ function renderOverview(){
   };
   const cards=[
     {icon:'📊',iconCls:'blue',value:totalAfter,label:'Completed callbacks',sub:'after-events (all pass types)',fmt:'num'},
-    {icon:'✅',iconCls:'green',value:changedPasses,label:'Structural-change callbacks',sub:'a metric counter moved',fmt:'num'},
-    {icon:'🧬',iconCls:'purple',value:totalIrChanged,label:'Any-IR-change callbacks',sub:'counters or IR text changed',fmt:'num'},
-    {icon:'🎯',iconCls:'purple',value:rate,label:'IR-changing callback rate',sub:rate!=null?`${totalIrChanged}/${totalAfter} changed`:'share of completed callbacks',fmt:'pct'},
+    {icon:'✅',iconCls:'green',value:structPasses,label:'Structural-change callbacks',sub:'a metric counter moved',fmt:'num'},
+    {icon:'🧬',iconCls:'purple',value:anyIrPasses,label:'Any-IR-change callbacks',sub:'counters or IR text changed',fmt:'num'},
+    {icon:'🎯',iconCls:'purple',value:rate,label:'IR-changing callback rate',sub:rate!=null?`${anyIrPasses}/${totalAfter} changed`:'share of completed callbacks',fmt:'pct'},
     {icon:'⚡',iconCls:'green',value:iPct,label:'Whole-module instruction change',sub:s.total_instructions_before!=null&&s.total_instructions_after!=null?`${s.total_instructions_before} → ${s.total_instructions_after} (${-iRed>0?'+':''}${-iRed})`:'initial/final totals unavailable',fmt:'pct'},
     {icon:'📦',iconCls:'yellow',value:cgPct,label:'Assembly line-count change',sub:cgPct!=null?`${s.codegen_asm_lines_before} → ${s.codegen_asm_lines_after} lines (size proxy, not runtime)`:'codegen unavailable or failed',fmt:'pct'},
     {icon:'⚠️',iconCls:'red',value:s.total_invalidated,label:'No-after-state callbacks',sub:'pass deleted its own IR unit',fmt:'num'},
@@ -689,7 +699,7 @@ function renderOverview(){
   const cgArrow=cgRed>0?`<span class="hl">${cgPct}% smaller</span>`:cgRed<0?`<span class="hl-red">${-cgPct}% larger</span>`:'no change';
   document.getElementById('overview-story').innerHTML=`<h3>Pipeline Story</h3><p>
     The <strong>-${esc(D.pipeline)}</strong> pipeline executed <strong>${s.total_before}</strong> passes.
-    <strong>${changedPasses}</strong> produced measurable changes — ${iArrow} in IR instructions,
+    <strong>${anyIrPasses}</strong> produced measurable changes — ${iArrow} in IR instructions,
     codegen is ${cgArrow}.
     ${s.total_invalidated>0?`<span class="hl-red">${s.total_invalidated} passes invalidated.</span>`:'Stack balanced.'}
   </p>`;
@@ -703,21 +713,20 @@ function normalizeHistory(d){
   const s=d.summary;
   const evts=d.events||[];
   let totalBefore=0,totalAfter=0,changed=0,irChanged=0,invalidated=0;
-  let instrBefore=0,instrAfter=0,bbBefore=0,bbAfter=0;
   for(const e of evts){
-    if(e.event_type==='before'){
-      totalBefore++;
-      if(e.metrics_before){instrBefore+=e.metrics_before.instruction_count||0;bbBefore+=e.metrics_before.basic_block_count||0;}
-    }else if(e.event_type==='after'){
+    if(e.event_type==='before')totalBefore++;
+    else if(e.event_type==='after'){
       totalAfter++;
-      if(e.ir_changed)irChanged++;
       if(e.has_changes)changed++;
-      if(e.metrics_after){instrAfter+=e.metrics_after.instruction_count||0;bbAfter+=e.metrics_after.basic_block_count||0;}
-    }else if(e.event_type==='invalidated'){invalidated++;}
+      if(e.has_changes||e.ir_changed)irChanged++;
+    }else if(e.event_type==='invalidated')invalidated++;
   }
-  const calc={total_before:totalBefore,total_after:totalAfter,passes_with_changes:changed,
-    total_instructions_before:instrBefore,total_instructions_after:instrAfter,
-    total_basic_blocks_before:bbBefore,total_basic_blocks_after:bbAfter,
+  // Only event-count fields are recomputed here (exact, schema-2 semantics).
+  // Module instruction/BB totals use the writer's authoritative first/last
+  // module-observation selection and are not re-derivable cheaply in the
+  // browser, so they are intentionally not validated.
+  const calc={total_before:totalBefore,total_after:totalAfter,
+    passes_with_changes:changed,passes_with_ir_changes:irChanged,
     total_invalidated:invalidated};
   let mismatch=false;
   for(const k of Object.keys(calc)){
@@ -977,9 +986,7 @@ function selectFuncPass(idx){
       :'This event has only one side of the snapshot pair (old or foreign file).';
     document.getElementById('func-diff-area').innerHTML='<div style="padding:30px;text-align:center;color:var(--text-muted);white-space:pre-line">'+why+'</div>';return}
 
-  const bL=e.ir_before.split('\n'),aL=e.ir_after.split('\n');
-  const bS=new Set(bL),aS=new Set(aL);
-  const renderLines=(lines,otherSet,added)=>lines.map((l,i)=>{const cls=l.trim()&&!otherSet.has(l)?(added?'added':'removed'):'unchanged';return `<div class="ir-line ${cls}"><span class="ln">${i+1}</span><span class="code">${esc(l)}</span></div>`}).join('');
+  const dh=orderedDiffHtml(e.ir_before,e.ir_after);
 
   CURRENT_DIFF_BEFORE=e.ir_before;
   CURRENT_DIFF_AFTER=e.ir_after;
@@ -987,8 +994,8 @@ function selectFuncPass(idx){
     <div style="font-size:12px;font-weight:700;margin-bottom:8px;font-family:'JetBrains Mono',monospace;display:flex;align-items:center;gap:10px">${esc(e.pass_name)} <span style="color:var(--text-muted);font-weight:400">· IR diff</span><button class="ai-explain-btn" onclick="explainEvent(event,${e.id})">✨ Explain</button></div>
     <div style="display:flex;gap:12px;margin-bottom:12px;font-size:11px;flex-wrap:wrap">${metricChips(e)}</div>
     <div style="display:flex;gap:1px;border-radius:8px;overflow:hidden;border:1px solid var(--border)">
-      <div style="flex:1;overflow:auto;max-height:300px;background:var(--bg-primary)"><div style="font-size:9px;color:var(--text-muted);padding:8px 12px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;border-bottom:1px solid var(--border)">Before <button class="ai-explain-btn" onclick="copyDiffBtn(this,'before')" title="Copy the full before-IR text to the clipboard">⧉ Copy</button></div>${renderLines(bL,aS,false)}</div>
-      <div style="flex:1;overflow:auto;max-height:300px;background:var(--bg-primary)"><div style="font-size:9px;color:var(--text-muted);padding:8px 12px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;border-bottom:1px solid var(--border)">After <button class="ai-explain-btn" onclick="copyDiffBtn(this,'after')" title="Copy the full after-IR text to the clipboard">⧉ Copy</button></div>${renderLines(aL,bS,true)}</div>
+      <div style="flex:1;overflow:auto;max-height:300px;background:var(--bg-primary)"><div style="font-size:9px;color:var(--text-muted);padding:8px 12px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;border-bottom:1px solid var(--border)">Before <button class="ai-explain-btn" onclick="copyDiffBtn(this,'before')" title="Copy the full before-IR text to the clipboard">⧉ Copy</button></div>${dh.before}</div>
+      <div style="flex:1;overflow:auto;max-height:300px;background:var(--bg-primary)"><div style="font-size:9px;color:var(--text-muted);padding:8px 12px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;border-bottom:1px solid var(--border)">After <button class="ai-explain-btn" onclick="copyDiffBtn(this,'after')" title="Copy the full after-IR text to the clipboard">⧉ Copy</button></div>${dh.after}</div>
     </div>`;
 }
 function closeFuncModal(){document.getElementById('func-modal-bg').classList.remove('open')}
@@ -1180,11 +1187,11 @@ function openDiff(eid){
   CURRENT_DIFF_BEFORE=e.ir_before;
   CURRENT_DIFF_AFTER=e.ir_after;
   document.getElementById('modal-title').innerHTML=`<span class="hl">${esc(e.pass_name)}</span> · ${e.ir_kind} ${esc(e.ir_name)}`;
-  const bL=e.ir_before.split('\n'),aL=e.ir_after.split('\n'),bS=new Set(bL),aS=new Set(aL);
-  const render=(lines,otherSet,added)=>lines.map((l,i)=>{const cls=l.trim()&&!otherSet.has(l)?(added?'added':'removed'):'unchanged';return `<div class="ir-line ${cls}"><span class="ln">${i+1}</span><span class="code">${esc(l)}</span></div>`}).join('');
-  document.getElementById('ir-before').innerHTML=render(bL,aS,false);
-  document.getElementById('ir-after').innerHTML=render(aL,bS,true);
+  const dh=orderedDiffHtml(e.ir_before,e.ir_after);
+  document.getElementById('ir-before').innerHTML=dh.before;
+  document.getElementById('ir-after').innerHTML=dh.after;
   document.getElementById('modal-footer').innerHTML=metricChips(e)
+    +(dh.fallback?'<div style="padding:4px 12px;color:var(--text-muted);font-size:10px">Low text similarity — line alignment is approximate.</div>':'')
     +'<button class="ai-explain-btn" onclick="explainCurrentDiff()">✨ Explain this change</button>';
   document.getElementById('modal-bg').classList.add('open');
 }
@@ -1269,6 +1276,26 @@ function orderedDiff(a,b){
   while(bj<m){rows.push({t:'+',b:bj});bj++;}
   }
   return{rows,fallback:dp[n][m]<Math.max(n,m)*0.4};
+}
+
+// Render ordered diff HTML for before/after panes. Uses orderedDiff()
+// to align moved/duplicate lines, then filters rows per side.
+function orderedDiffHtml(bText,aText){
+  const bL=bText.split('\n'),aL=aText.split('\n');
+  const d=orderedDiff(bL,aL);
+  const render=(isBefore)=>{
+    const skip=isBefore?'+':'-';
+    let html='';
+    for(const r of d.rows){
+      if(r.t===skip)continue;
+      const idx=isBefore?r.a:r.b;
+      const line=isBefore?bL[idx]:aL[idx];
+      const cls=(isBefore&&r.t!==' ')?'removed':(!isBefore&&r.t!==' ')?'added':'unchanged';
+      html+=`<div class="ir-line ${cls}"><span class="ln">${idx+1}</span><span class="code">${esc(line)}</span></div>`;
+    }
+    return html;
+  };
+  return{before:render(true),after:render(false),fallback:d.fallback};
 }
 // Raw IR of the currently open diff, for the copy buttons.
 let CURRENT_DIFF_BEFORE='',CURRENT_DIFF_AFTER='';
@@ -1916,9 +1943,24 @@ function renderCompareResults(cmp){
     return;
   }
 
-  const scoreColor=score>60?'var(--red)':score>30?'var(--yellow)':'var(--green)';
-  const scoreLabel=score>60?'Regressed':score>30?'Mixed':'Improved';
-  const scoreClass=score>60?'bad':score>30?'warn':'good';
+  // Map backend verdict to display label/color. The verdict is authoritative;
+  // score is secondary (for gradations within 'mixed'/'regressed').
+  const verdict=cmp.verdict||(score>60?'regressed':score>30?'mixed':(posImp>0?'improved':'unchanged'));
+  let scoreColor,vLabel,scoreClass;
+  switch(verdict){
+    case 'unchanged':
+      scoreColor='var(--green)';vLabel='Unchanged';scoreClass='good';break;
+    case 'improved':
+      scoreColor='var(--green)';vLabel='Improved';scoreClass='good';break;
+    case 'mixed':
+      scoreColor='var(--yellow)';vLabel='Mixed';scoreClass='warn';break;
+    case 'regressed':
+      scoreColor='var(--red)';vLabel='Regressed';scoreClass='bad';break;
+    default:
+      scoreColor=score>60?'var(--red)':score>30?'var(--yellow)':'var(--green)';
+      vLabel=score>60?'Regressed':score>30?'Mixed':'Improved';
+      scoreClass=score>60?'bad':score>30?'warn':'good';
+  }
   const circumference=2*Math.PI*42;
   const offset=circumference-(score/100)*circumference;
 
@@ -1932,11 +1974,11 @@ function renderCompareResults(cmp){
   html+='<div class="score-value" style="color:'+scoreColor+'">'+score+'</div>';
   html+='</div>';
   html+='<div class="compare-score-details">';
-  html+='<h4><span class="score-verdict '+scoreClass+'">'+scoreLabel+'</span> — Regression risk score: '+score+'/100</h4>';
+  html+='<h4><span class="score-verdict '+scoreClass+'">'+vLabel+'</span> — Regression risk score: '+score+'/100</h4>';
   html+='<div class="score-desc">';
-  if(score<=10) html+='The current run shows consistent improvements across instructions, codegen, and pass behavior.';
-  else if(score<=30) html+='The current run shows mostly improvements with minor variations.';
-  else if(score<=60) html+='The current run shows mixed results — some areas improved, others regressed.';
+  if(verdict==='unchanged') html+='The two runs are effectively identical — no regressions in instructions, codegen, or pass behavior.';
+  else if(verdict==='improved') html+='The current run shows consistent improvements across instructions, codegen, and pass behavior.';
+  else if(verdict==='mixed') html+='The current run shows mixed results — some areas improved, others regressed.';
   else html+='The current run shows significant regressions that may warrant investigation.';
   html+='</div><div class="score-desc" style="margin-top:6px;opacity:.75">Heuristic composite of instruction/codegen deltas and finding counts — a triage aid, not a benchmark.</div></div></div>';
 
@@ -1949,6 +1991,11 @@ function renderCompareResults(cmp){
 
   if(sb.pipeline_changed){
     html+='<div class="pipeline-change-banner reveal"><span class="pc-icon">ℹ</span> Pipeline changed from <strong>'+esc(sb.base_pipeline)+'</strong> to <strong>'+esc(sb.curr_pipeline)+'</strong></div>';
+  }
+
+  // Show compatibility warnings even for comparable results
+  if(cmp.compat&&cmp.compat.warnings&&cmp.compat.warnings.length){
+    html+='<div class="pipeline-change-banner reveal" style="border-color:rgba(251,191,36,.3);background:rgba(251,191,36,.05)"><span class="pc-icon" style="color:var(--yellow)">⚠</span> <span style="color:var(--text-secondary)">Warnings: '+cmp.compat.warnings.map(w=>esc(w)).join(' · ')+'</span></div>';
   }
 
   html+='<div class="compare-section reveal">';
@@ -1966,19 +2013,29 @@ function renderCompareResults(cmp){
 
   if(cmp.targets && cmp.targets.length){
     html+='<div class="compare-section reveal"><div class="compare-section-header"><h3>Cross-Target Codegen</h3></div><div class="compare-section-body">';
-    html+='<table class="compare-table"><thead><tr><th>Target</th><th>Baseline Before</th><th>Baseline After</th><th>Baseline Δ</th><th>Current Before</th><th>Current After</th><th>Current Δ</th><th>Δ vs Baseline</th></tr></thead><tbody>';
+    html+='<table class="compare-table"><thead><tr><th>Target</th><th>State</th><th>Baseline Before</th><th>Baseline After</th><th>Baseline Δ</th><th>Current Before</th><th>Current After</th><th>Current Δ</th><th>Δ vs Baseline</th></tr></thead><tbody>';
     for(const t of cmp.targets){
-      if(!t.available){
-        html+='<tr class="warn"><td>'+esc(t.target)+'</td><td colspan="6">Error: '+esc(t.base_error||t.curr_error)+'</td></tr>';
-      }else{
+      const st=t.state||'unknown';
+      if(st==='comparable'){
         const cls=t.red_delta>0?'neg':t.red_delta<0?'pos':'zero';
         const brc=t.base_red>0?'neg':t.base_red<0?'pos':'zero';
         const crc=t.curr_red>0?'neg':t.curr_red<0?'pos':'zero';
-        html+='<tr><td>'+esc(t.target)+'</td><td>'+t.base_before+'</td><td>'+t.base_after+'</td>';
+        html+='<tr><td>'+esc(t.target)+'</td><td><span class="pass-status present_in_both" title="comparable">comparable</span></td>';
+        html+='<td>'+t.base_before+'</td><td>'+t.base_after+'</td>';
         html+='<td class="'+brc+'">'+(t.base_red>0?'+':'')+t.base_red+'</td>';
         html+='<td>'+t.curr_before+'</td><td>'+t.curr_after+'</td>';
         html+='<td class="'+crc+'">'+(t.curr_red>0?'+':'')+t.curr_red+'</td>';
         html+='<td class="'+cls+'">'+(t.red_delta>0?'+':'')+t.red_delta+'</td></tr>';
+      }else{
+        const stLabel=st.replace(/_/g,' ');
+        const errMsg=st==='new_target'?(t.curr_error||'new target — no baseline')
+                    :st==='removed_target'?(t.base_error||'removed — no current')
+                    :st==='baseline_error'?(t.base_error||'baseline error')
+                    :st==='current_error'?(t.curr_error||'current error')
+                    :st==='both_error'?((t.base_error||'baseline')+' / '+(t.curr_error||'current'))
+                    :'unknown state';
+        html+='<tr class="warn"><td>'+esc(t.target)+'</td><td><span class="pass-status removed" title="'+stLabel+'">'+stLabel+'</span></td>';
+        html+='<td colspan="7" style="color:var(--text-muted)">'+esc(errMsg)+'</td></tr>';
       }
     }
     html+='</tbody></table></div></div>';
@@ -1987,12 +2044,12 @@ function renderCompareResults(cmp){
   if(cmp.passes && cmp.passes.length){
     html+='<div class="compare-section reveal"><div class="compare-section-header"><h3>Pass-Level Impact</h3><span class="hint">'+cmp.passes.length+' passes compared</span></div><div class="compare-section-body">';
     html+='<div class="compare-sort-bar"><label>Sort by:</label>';
-    const sorts=[['instr_delta_delta','Instr Δ'],['bb_delta_delta','BB Δ'],['load_delta_delta','Load Δ'],['store_delta_delta','Store Δ'],['count_delta','Exec Count']];
+    const sorts=[['instr_delta_delta','Instr Δ'],['bb_delta_delta','BB Δ'],['load_delta_delta','Load Δ'],['store_delta_delta','Store Δ'],['count_delta','Effect Δ']];
     for(const [k,lbl] of sorts){
       html+='<button class="compare-sort-btn '+(COMPARE_SORT===k?'active':'')+'" onclick="compareSort(\''+k+'\')">'+lbl+'</button>';
     }
     html+='</div>';
-    html+='<table class="compare-table"><thead><tr><th>Pass</th><th>Status</th><th>Base Count</th><th>Curr Count</th><th>Count Δ</th><th>Base Instr Δ</th><th>Curr Instr Δ</th><th>Instr Δ²</th><th>BB Δ²</th><th>Load Δ²</th><th>Store Δ²</th></tr></thead><tbody>';
+    html+='<table class="compare-table"><thead><tr><th>Pass</th><th>Presence</th><th>Effect</th><th>Base Exec</th><th>Curr Exec</th><th>Exec Δ</th><th>Base Eff</th><th>Curr Eff</th><th>Instr Δ²</th><th>BB Δ²</th><th>Load Δ²</th><th>Store Δ²</th></tr></thead><tbody>';
     const sorted=[...cmp.passes].sort((a,b)=>{
       const av=Math.abs(a[COMPARE_SORT]||0);
       const bv=Math.abs(b[COMPARE_SORT]||0);
@@ -2004,15 +2061,21 @@ function renderCompareResults(cmp){
       const lc=p.load_delta_delta<0?'neg':p.load_delta_delta>0?'pos':'zero';
       const sc=p.store_delta_delta<0?'neg':p.store_delta_delta>0?'pos':'zero';
       const warn=(p.instr_delta_delta>20||p.bb_delta_delta>10)?' warn':'';
-      const st=p.status||'unchanged';
-      const stl=st==='new'?'NEW':st==='removed'?'GONE':'';
+      const st=p.status||'present_in_both';
+      const stl=st==='added'?'NEW':st==='removed'?'GONE':'';
+      const eff=p.effect_status||'unchanged_effect';
+      const effLabel=eff==='newly_effectful'?'newly effective':eff==='no_longer_effectful'?'no longer effective':'';
+      const effTitle={'newly_effectful':'Pass now changes the IR where it did not before','no_longer_effectful':'Pass no longer changes the IR','unchanged_effect':'Same effect as baseline'}[eff]||'';
+      const execDelta=(p.curr_exec_count||0)-(p.base_exec_count||0);
       const dcls=v=>v<0?'neg':v>0?'pos':'zero';
       html+='<tr class="'+warn+'"><td><strong>'+esc(p.pass_name)+'</strong></td>';
-      html+='<td><span class="pass-status '+st+'">'+stl+'</span></td>';
+      html+='<td><span class="pass-status '+st+'" title="Presence: '+st+'">'+stl+'</span></td>';
+      html+='<td><span class="pass-status '+eff+'" title="'+effTitle+'">'+effLabel+'</span></td>';
+      html+='<td>'+(p.base_exec_count!=null?p.base_exec_count:p.base_count)+'</td>';
+      html+='<td>'+(p.curr_exec_count!=null?p.curr_exec_count:p.curr_count)+'</td>';
+      html+='<td class="'+dcls(execDelta)+'">'+(execDelta>0?'+':'')+execDelta+'</td>';
       html+='<td>'+p.base_count+'</td><td>'+p.curr_count+'</td>';
       html+='<td class="'+dcls(p.count_delta)+'">'+(p.count_delta>0?'+':'')+p.count_delta+'</td>';
-      html+='<td class="'+dcls(p.base_instr_delta)+'">'+(p.base_instr_delta>0?'+':'')+p.base_instr_delta+'</td>';
-      html+='<td class="'+dcls(p.curr_instr_delta)+'">'+(p.curr_instr_delta>0?'+':'')+p.curr_instr_delta+'</td>';
       html+='<td class="'+ic+'">'+(p.instr_delta_delta>0?'+':'')+p.instr_delta_delta+'</td>';
       html+='<td class="'+bc+'">'+(p.bb_delta_delta>0?'+':'')+p.bb_delta_delta+'</td>';
       html+='<td class="'+lc+'">'+(p.load_delta_delta>0?'+':'')+p.load_delta_delta+'</td>';
