@@ -414,8 +414,14 @@ else
 fi
 
 # Test: headless dashboard smoke (node) against the snapshot report above
-if command -v node &>/dev/null && [ -f tests/dashboard_smoke.js ] && [ -f "$TMP_DIR/t_snap/history.json" ]; then
-    if node tests/dashboard_smoke.js "$TMP_DIR/t_snap/history.json" >>"$REPORT" 2>&1; then
+# (node.exe probe covers Git Bash, where Windows node is on PATH)
+HAVE_NODE=0
+command -v node &>/dev/null && HAVE_NODE=1
+if [ $HAVE_NODE -eq 0 ]; then command -v node.exe &>/dev/null && HAVE_NODE=1; fi
+if [ $HAVE_NODE -eq 1 ] && [ -f tests/dashboard_smoke.js ] && [ -f "$TMP_DIR/t_snap/history.json" ]; then
+    _node_bin=node
+    command -v node &>/dev/null || _node_bin=node.exe
+    if $_node_bin tests/dashboard_smoke.js "$TMP_DIR/t_snap/history.json" >>"$REPORT" 2>&1; then
         pass "Dashboard smoke: render paths, diffs, copy, compare labels"
     else
         fail "Dashboard smoke: see $REPORT for failing check"
