@@ -372,6 +372,46 @@ else
     fail "--compare summary lost with empty events array"
 fi
 rm -f "$COMPARE_TBASE" "$COMPARE_TCURR"
+# Test: independent recount matches LPTA initial metrics on every shipped input
+if command -v python3 &>/dev/null && [ -f tests/count_ir.py ]; then
+    SWEEP_PASS=0
+    SWEEP_FAIL=0
+    for _f in test.ll real_test.ll tests/tiny_proof.ll tests/edge_cases/ir/0*.ll tests/edge_cases/ir/1*.ll tests/judge_demo/demo.ll; do
+        [ -f "$_f" ] || continue
+        _n=$(basename "$_f" .ll)
+        "$EXE" "$_f" "$TMP_DIR/sweep_$_n" -O0 >/dev/null 2>&1
+        if [ $? -ne 0 ]; then
+            echo "  [SWEEP-FAIL] $_f: LPTA run failed" | tee -a "$REPORT"
+            SWEEP_FAIL=$((SWEEP_FAIL + 1))
+            continue
+        fi
+        if python3 -c "
+import json, sys
+sys.path.insert(0, 'tests')
+from count_ir import count_file
+gt = count_file('$_f')
+d = json.load(open('$TMP_DIR/sweep_$_n/history.json'))
+first = next(e for e in d['events'] if e['event_type'] == 'before' and e.get('ir_kind') == 'Module')
+m = first['metrics']
+keys = {'function_count': 'GT_FUNCTIONS', 'basic_block_count': 'GT_BBS',
+        'instruction_count': 'GT_INSTRUCTIONS', 'call_count': 'GT_CALLS',
+        'load_count': 'GT_LOADS', 'store_count': 'GT_STORES',
+        'branch_count': 'GT_BRANCHES', 'phi_count': 'GT_PHIS',
+        'return_count': 'GT_RETURNS', 'global_count': 'GT_GLOBALS'}
+bad = [k for k, g in keys.items() if m[k] != gt[g]]
+sys.exit(1 if bad else 0)
+" >/dev/null 2>&1; then
+            SWEEP_PASS=$((SWEEP_PASS + 1))
+        else
+            echo "  [SWEEP-FAIL] $_f: recount mismatch" | tee -a "$REPORT"
+            SWEEP_FAIL=$((SWEEP_FAIL + 1))
+        fi
+        rm -rf "$TMP_DIR/sweep_$_n"
+    done
+    [ $SWEEP_FAIL -eq 0 ] && pass "Input sweep: $SWEEP_PASS shipped inputs match recount" || fail "Input sweep: $SWEEP_FAIL mismatches"
+else
+    echo "  [SKIP] input sweep (needs python3 + tests/count_ir.py)" | tee -a "$REPORT"
+fi
 echo "" | tee -a "$REPORT"
 
 # -------------------------------------------------------
