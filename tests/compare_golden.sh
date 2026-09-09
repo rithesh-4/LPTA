@@ -164,5 +164,138 @@ PYEOF
     rm -f "$case_dir"/.cli.json "$case_dir"/.srv.json "$case_dir"/.cli.norm "$case_dir"/.srv.norm "$case_dir"/.cli.err "$case_dir"/.srv.err
 done
 
+MALFORMED="$BUILD_DIR/.malformed_history.json"
+python3 - "$GOLDEN_DIR/01_identical/base.json" "$MALFORMED" <<'PYEOF'
+import json, sys
+data = json.load(open(sys.argv[1]))
+after = next(e for e in data["events"] if e["event_type"] == "after")
+after["metrics_after"]["instruction_count"] = "not-a-number"
+json.dump(data, open(sys.argv[2], "w"), indent=2)
+PYEOF
+if "$EXE" --compare "$MALFORMED" "$GOLDEN_DIR/01_identical/curr.json" --json \
+    >/dev/null 2>"$BUILD_DIR/.malformed_cli.err"; then
+    fail "malformed history: CLI accepted an invalid metric"
+else
+    pass "malformed history: CLI rejects invalid metric types"
+fi
+if python3 - "$MALFORMED" "$GOLDEN_DIR/01_identical/curr.json" "$PORT" <<'PYEOF'
+import json, sys, urllib.error, urllib.request
+base = json.load(open(sys.argv[1]))
+curr = json.load(open(sys.argv[2]))
+req = urllib.request.Request(
+    f"http://127.0.0.1:{sys.argv[3]}/api/compare",
+    data=json.dumps({"base": base, "current": curr}).encode(),
+    headers={"Content-Type": "application/json"})
+try:
+    urllib.request.urlopen(req, timeout=30)
+except urllib.error.HTTPError as exc:
+    body = json.loads(exc.read())
+    assert exc.code == 400
+    assert body.get("error") == "invalid history schema"
+    assert body.get("details")
+else:
+    raise AssertionError("server accepted malformed history")
+PYEOF
+then
+    pass "malformed history: server returns structured validation errors"
+else
+    fail "malformed history: server validation contract failed"
+fi
+rm -f "$MALFORMED" "$BUILD_DIR/.malformed_cli.err"
+
+if python3 - "$EXE" "$GOLDEN_DIR/01_identical/base.json" "$PORT" "$BUILD_DIR" <<'PYEOF'
+import copy
+import json
+import pathlib
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+exe, source_path, port, build_dir = sys.argv[1:]
+source = json.load(open(source_path))
+build = pathlib.Path(build_dir)
+
+def server_compare(base, curr):
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/compare",
+        data=json.dumps({"base": base, "current": curr}).encode(),
+        headers={"Content-Type": "application/json"})
+    return json.loads(urllib.request.urlopen(req, timeout=30).read())
+
+def cli_compare(base_path, curr_path):
+    proc = subprocess.run(
+        [exe, "--compare", str(base_path), str(curr_path), "--json"],
+        capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise AssertionError(proc.stderr)
+    return json.loads(proc.stdout)
+
+for name, fail_base, fail_curr in (
+        ("baseline", True, False),
+        ("current", False, True),
+        ("both", True, True)):
+    base = copy.deepcopy(source)
+    curr = copy.deepcopy(source)
+    for report, failed in ((base, fail_base), (curr, fail_curr)):
+        if failed:
+            report["summary"]["codegen_error_before"] = "llc before failed"
+            report["summary"]["codegen_error_after"] = "llc after failed"
+            report["summary"]["codegen_asm_lines_before"] = 0
+            report["summary"]["codegen_asm_lines_after"] = 0
+            report["summary"]["codegen_asm_bytes_before"] = 0
+            report["summary"]["codegen_asm_bytes_after"] = 0
+    base_path = build / f".codegen_{name}_base.json"
+    curr_path = build / f".codegen_{name}_curr.json"
+    base_path.write_text(json.dumps(base, indent=2))
+    curr_path.write_text(json.dumps(curr, indent=2))
+    cli = cli_compare(base_path, curr_path)
+    server = server_compare(base, curr)
+    assert cli == server, name
+    for key in (
+            "codegen_asm_lines_before", "codegen_asm_lines_after",
+            "codegen_asm_bytes_before", "codegen_asm_bytes_after",
+            "codegen_reduction_delta"):
+        assert cli["summary"][key] is None, (name, key)
+    assert cli["coverage"]["codegen"] is False, name
+    assert cli["score_components"]["codegen"] == 0, name
+    assert not any(
+        item.get("type") in ("codegen_regression", "codegen_improvement")
+        for item in cli["regressions"] + cli["improvements"]), name
+    base_path.unlink()
+    curr_path.unlink()
+
+for name, mutate in (
+        ("missing_summary", lambda d:
+            d["summary"].pop("total_instructions_after")),
+        ("missing_metric", lambda d:
+            next(e for e in d["events"]
+                 if e["event_type"] == "after")["metrics_after"].pop(
+                     "instruction_count"))):
+    malformed = copy.deepcopy(source)
+    mutate(malformed)
+    malformed_path = build / f".{name}.json"
+    malformed_path.write_text(json.dumps(malformed, indent=2))
+    proc = subprocess.run(
+        [exe, "--compare", str(malformed_path), source_path, "--json"],
+        capture_output=True, text=True)
+    assert proc.returncode != 0, name
+    try:
+        server_compare(malformed, source)
+    except urllib.error.HTTPError as exc:
+        body = json.loads(exc.read())
+        assert exc.code == 400, name
+        assert body.get("error") == "invalid history schema", name
+        assert body.get("details"), name
+    else:
+        raise AssertionError(f"server accepted {name}")
+    malformed_path.unlink()
+PYEOF
+then
+    pass "availability/schema fixtures: CLI/server parity holds"
+else
+    fail "availability/schema fixtures: parity or validation failed"
+fi
+
 echo "=== Golden: $PASS passed, $FAIL failed ==="
 exit $FAIL

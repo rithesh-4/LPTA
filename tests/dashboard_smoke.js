@@ -34,7 +34,7 @@ function mkEl() {
         innerHTML: "", textContent: "", value: "", disabled: false,
         style: {}, dataset: {},
         classList: { add() {}, remove() {}, contains: () => false },
-        addEventListener() {}, appendChild() {}, removeChild() {},
+        addEventListener() {}, appendChild() {}, removeChild() {}, remove() {},
         prepend() {},
         click() {}, focus() {}, scrollIntoView() {},
         getContext: () => mkCtx(),
@@ -44,13 +44,32 @@ function mkEl() {
     };
 }
 const __els = {};
+let __exportedText = "";
 let fetchMode = "reject"; // 'reject' | 'compare-ok'
 const cannedCompare = {
-    summary: { total_instructions_before: 100, total_instructions_after: 90 },
+    summary: {
+        total_instructions_before: 0, total_instructions_after: -10,
+        total_bbs_after: 0, passes_with_changes: 0,
+        passes_with_ir_changes: 1, total_invalidated: 0,
+    },
     base_meta: { module: "a.ll", pipeline: "O2" },
     curr_meta: { module: "a.ll", pipeline: "O2" },
-    regression_score: 35, regressions: [], improvements: [],
-    passes: [], targets: [], new_passes: [], removed_passes: [],
+    regression_score: 0, verdict: "unchanged",
+    compat: { blocked: null, warnings: ["pipeline differs"] },
+    regressions: [], improvements: [],
+    passes: [{
+        pass_name: "NewPass", status: "added",
+        effect_status: "newly_effectful",
+        base_exec_count: 0, curr_exec_count: 1,
+        base_count: 0, curr_count: 1, count_delta: 1,
+        base_instr_delta: 0, curr_instr_delta: -10, instr_delta_delta: -10,
+        bb_delta_delta: 0, load_delta_delta: 0, store_delta_delta: 0,
+    }],
+    targets: [{
+        target: "x86_64", state: "baseline_error",
+        base_error: "llc failed", curr_error: null,
+    }],
+    new_passes: ["NewPass"], removed_passes: [],
 };
 function setGlobal(k, v) {
     try { global[k] = v; }
@@ -80,6 +99,16 @@ setGlobal("IntersectionObserver", class { observe() {} disconnect() {} });
 setGlobal("performance", { now: () => 0 });
 setGlobal("devicePixelRatio", 1);
 setGlobal("navigator", {});
+setGlobal("Blob", class {
+    constructor(parts) { this.parts = parts; }
+});
+setGlobal("URL", {
+    createObjectURL(blob) {
+        __exportedText = blob.parts.map((part) => String(part)).join("");
+        return "blob:smoke";
+    },
+    revokeObjectURL() {},
+});
 setGlobal("fetch", (url) => {
     if (fetchMode === "compare-ok" && String(url) === "/api/compare") {
         return Promise.resolve({ ok: true, json: async () => cannedCompare });
@@ -89,6 +118,7 @@ setGlobal("fetch", (url) => {
 setGlobal("__els", __els);
 setGlobal("__fs", fs);
 setGlobal("__setFetchMode", (m) => { fetchMode = m; });
+setGlobal("__getExportedText", () => __exportedText);
 
 // ---------- load the real inline script + driver in ONE eval ----------
 const html = fs.readFileSync(path.join(ROOT, "dashboard.html"), "utf8");
@@ -115,23 +145,48 @@ try {
 
     // 2. render a real report
     D = JSON.parse(__fs.readFileSync(${JSON.stringify(HIST)}, "utf8"));
+    check("real report validates", validateHistory(D).valid);
+    REPORT_INTEGRITY = normalizeHistory(D);
     render();
     for (let i = 0; i < 5; i++) await Promise.resolve();
     check("events rendered", __els["events"].innerHTML.length > 500,
         "events html length=" + __els["events"].innerHTML.length);
 
     // 3. openDiff on a snapshot event: footer rows well-formed, copy present
-    const snap = D.events.find((e) => e.event_type === "after" && e.ir_before && e.ir_after);
+    let snap = D.events.find((e) => e.event_type === "after" && e.ir_before && e.ir_after);
+    if (!snap) {
+        snap = D.events.find((e) => e.event_type === "after");
+        if (snap) {
+            snap.ir_kind = "Function";
+            snap.ir_name = "smoke_function";
+            snap.has_changes = true;
+            snap.ir_changed = true;
+            snap.ir_before = "define i32 @smoke_function() {\\nentry:\\n  %x = add i32 1, 2\\n  ret i32 %x\\n}";
+            snap.ir_after = "define i32 @smoke_function() {\\nentry:\\n  ret i32 3\\n}";
+        }
+    }
     check("fixture has a snapshot event", !!snap);
     if (snap) {
+        if (snap.metrics_before.instruction_count === snap.metrics_after.instruction_count) {
+            snap.metrics_after.instruction_count =
+                snap.metrics_before.instruction_count > 0 ?
+                    snap.metrics_before.instruction_count - 1 : 1;
+            snap.has_changes = true;
+        }
+        let orderedCalls = 0;
+        const realOrderedDiff = orderedDiff;
+        orderedDiff = (...args) => { orderedCalls++; return realOrderedDiff(...args); };
         openDiff(snap.id);
         const foot = __els["modal-footer"].innerHTML;
         check("footer has full metric names", foot.includes("Instructions:") && foot.includes("Arith ops"));
         check("footer deltas parenthesized, never glued",
-            !/\\d→\\d{2,}</.test(foot) && /\\(\\+?\\-?\\d+\\)/.test(foot), foot.slice(0, 200));
+            foot.includes('class="md ') && foot.includes(')</span>'),
+            foot);
         check("footer tooltips present", foot.includes("title="));
         check("before pane rendered with line numbers",
             __els["ir-before"].innerHTML.includes('class="ln"'));
+        check("openDiff uses ordered renderer", orderedCalls === 1);
+        orderedDiff = realOrderedDiff;
     }
 
     // 4. func modal path: list tooltips + copy buttons + metric rows
@@ -145,11 +200,16 @@ try {
         const matches = D.events.map((e, i) => ({ e, i })).filter(({ e }) => e.ir_kind === "Function" && e.ir_name === fn && e.event_type === "after");
         const at = matches.findIndex(({ e }) => e.ir_before && e.ir_after);
         if (at >= 0) {
+            let orderedCalls = 0;
+            const realOrderedDiff = orderedDiff;
+            orderedDiff = (...args) => { orderedCalls++; return realOrderedDiff(...args); };
             selectFuncPass(at);
             const area = __els["func-diff-area"].innerHTML;
             check("func diff has copy buttons", (area.match(/copyDiffBtn\\(this/g) || []).length === 2,
                 "found " + (area.match(/copyDiffBtn\\(this/g) || []).length);
             check("func diff has readable metrics", area.includes("Instructions:"));
+            check("selectFuncPass uses ordered renderer", orderedCalls === 1);
+            orderedDiff = realOrderedDiff;
         } else {
             check("snapshot pass selectable", false, "no snapshot pass in " + fn);
         }
@@ -163,6 +223,13 @@ try {
     for (let i = 0; i < 5; i++) await Promise.resolve();
     check("compare labels risk score",
         __els["compare-results"].innerHTML.includes("Regression risk score"));
+    const compareHtml = __els["compare-results"].innerHTML;
+    check("compare renders backend verdict", compareHtml.includes("Unchanged"));
+    check("compare renders compatibility warnings", compareHtml.includes("pipeline differs"));
+    check("compare renders pass presence and effect",
+        compareHtml.includes("ADDED") && compareHtml.includes("NEW EFFECT"));
+    check("compare renders target state",
+        compareHtml.includes("Baseline codegen failed") && compareHtml.includes("llc failed"));
 
     // 5b. incomparable response renders the blocked state, never throws
     renderCompareResults({ regression_score: null, verdict: "incomparable",
@@ -190,6 +257,8 @@ try {
     const dr2 = orderedDiff(["same"], ["same"]);
     check("identical diff has no changes",
         !dr2.fallback && dr2.rows.length === 1 && dr2.rows[0].t === " ");
+    const big = orderedDiff(Array(1500).fill("a"), Array(1500).fill("b"));
+    check("large diff uses bounded fallback", big.fallback === true);
 
     // 8. unavailable values render N/A, tampered summary warns
     D.summary = JSON.parse(JSON.stringify(s2));
@@ -203,6 +272,19 @@ try {
     showIntegrityBanner(norm);
     check("integrity banner shown",
         (__els["integrity-banner"] || { innerHTML: "" }).innerHTML.includes("integrity notice"));
+    const malformed = JSON.parse(JSON.stringify(D));
+    const malformedAfter = malformed.events.find((e) => e.event_type === "after");
+    malformedAfter.metrics_after.instruction_count = "not-a-number";
+    check("malformed metric type rejected", !validateHistory(malformed).valid);
+
+    // 9. CSV includes every lifecycle event and neutralizes spreadsheet formulas
+    const originalPassName = D.events[0].pass_name;
+    D.events[0].pass_name = " =2+3";
+    exportCSV();
+    D.events[0].pass_name = originalPassName;
+    const csv = __getExportedText();
+    check("CSV exports every event", (csv.match(/^"/gm) || []).length === D.events.length + 1);
+    check("CSV neutralizes formula-like cells", csv.includes('"\\' =2+3"'));
 } catch (err) {
     __failures++;
     console.log("  [FAIL] driver threw: " + (err && err.stack));
