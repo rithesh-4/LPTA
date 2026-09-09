@@ -508,8 +508,8 @@ canvas.sparkline{width:100%;height:80px;display:block}
   <div class="modal">
     <div class="modal-top"><h2 id="modal-title"></h2><button class="close-btn" onclick="closeModal()">✕</button></div>
     <div class="modal-content">
-      <div class="ir-col before"><h3>Before</h3><div class="ir-code" id="ir-before"></div></div>
-      <div class="ir-col after"><h3>After</h3><div class="ir-code" id="ir-after"></div></div>
+      <div class="ir-col before"><h3>Before <button class="ai-explain-btn" onclick="copyDiffBtn(this,'before')" title="Copy the full before-IR text to the clipboard">⧉ Copy</button></h3><div class="ir-code" id="ir-before"></div></div>
+      <div class="ir-col after"><h3>After <button class="ai-explain-btn" onclick="copyDiffBtn(this,'after')" title="Copy the full after-IR text to the clipboard">⧉ Copy</button></h3><div class="ir-code" id="ir-after"></div></div>
     </div>
     <div class="modal-footer" id="modal-footer"></div>
   </div>
@@ -808,13 +808,13 @@ function renderFunctions(){
   const mx=Math.max(...funcs.map(f=>f.before));
   document.getElementById('func-grid').innerHTML=funcs.map((f,i)=>{
     const cls=f.delta<0?'positive':f.delta>0?'negative':'zero';
-    return `<div class="func-card reveal stagger-${(i%6)+1}" data-func="${esc(f.name)}" onclick="openFuncDetail(this.dataset.func)">
-      <div class="func-head"><div class="func-name">${esc(f.name)}</div><div class="func-delta ${cls}">${f.delta>0?'+':''}${f.delta}</div></div>
-      <div class="func-meta">${f.pct}% instruction reduction · ${f.passes} passes</div>
+    return `<div class="func-card reveal stagger-${(i%6)+1}" data-func="${esc(f.name)}" onclick="openFuncDetail(this.dataset.func)" title="Function ${esc(f.name)} — click to explore every pass execution on it">
+      <div class="func-head"><div class="func-name">${esc(f.name)}</div><div class="func-delta ${cls}" title="Net instruction change across all changing passes on this function">${f.delta>0?'+':''}${f.delta}</div></div>
+      <div class="func-meta" title="Share of instructions removed relative to before">${f.pct}% instruction reduction · ${f.passes} passes</div>
       <div class="func-bar-outer"><div class="func-bar-inner ${f.delta<=0?'green':'red'}" style="width:0%" data-width="${mx?f.before/mx*100:0}%"></div></div>
       <div class="func-stats">
-        <div class="func-stat">Instr: <span>${f.before} → ${f.after}</span></div>
-        <div class="func-stat">BBs: <span>${f.bbs_before} → ${f.bbs_after}</span></div>
+        <div class="func-stat" title="Instruction count before → after optimization">Instr: <span>${f.before} → ${f.after}</span></div>
+        <div class="func-stat" title="Basic-block count before → after optimization">BBs: <span>${f.bbs_before} → ${f.bbs_after}</span></div>
       </div>
       <div class="func-click">Click to explore →</div>
     </div>`}).join('');
@@ -837,10 +837,17 @@ function openFuncDetail(funcName){
     const delta=e.metrics_after.instruction_count-e.metrics_before.instruction_count;
     cumInstr+=delta;
     const cls=delta<0?'neg':delta>0?'pos':'zero';
-    return `<div class="func-pass-item" data-idx="${i}" onclick="selectFuncPass(${i})">
+    const irState=e.has_changes?(e.ir_before?'has IR diff':'changed · no snapshot'):e.ir_changed?(e.ir_before?'IR diff (counters equal)':'IR modified · no snapshot'):e.event_type==='invalidated'?'invalidated':'no change';
+    const irTip={'has IR diff':'Before/after IR text is stored — click the row to open the side-by-side diff.',
+      'changed · no snapshot':'Metrics moved but IR text was not captured (pass outside the snapshot allowlist, or the pair exceeded the size cap).',
+      'IR diff (counters equal)':'IR text changed while every counter stayed equal (e.g. a constant fold) — click the row to see the diff.',
+      'IR modified · no snapshot':'IR text changed with equal counters, but no snapshot was captured.',
+      'invalidated':'The pass deleted its own IR unit, so no after-state exists.',
+      'no change':'Neither metrics nor IR text changed for this pass execution.'}[irState];
+    return `<div class="func-pass-item" data-idx="${i}" onclick="selectFuncPass(${i})" title="Pass execution #${e.id} — click to inspect">
       <div class="fp-name">${esc(e.pass_name)}</div>
-      <div class="fp-delta ${cls}">${delta>0?'+':''}${delta} instr · cum: ${cumInstr}</div>
-      <div class="fp-ir">${e.has_changes?(e.ir_before?'has IR diff':'changed · no snapshot'):e.ir_changed?(e.ir_before?'IR diff (counters equal)':'IR modified · no snapshot'):e.event_type==='invalidated'?'invalidated':'no change'}</div>
+      <div class="fp-delta ${cls}" title="Net change by this pass execution: ${delta>0?'+':''}${delta} instructions. Running total for this function: ${cumInstr}.">${delta>0?'+':''}${delta} instr · cum: ${cumInstr}</div>
+      <div class="fp-ir" title="${irTip}">${irState}</div>
     </div>`;
   });
   document.getElementById('func-pass-list').innerHTML=passItems.join('');
@@ -926,15 +933,14 @@ function selectFuncPass(idx){
   const bS=new Set(bL),aS=new Set(aL);
   const renderLines=(lines,otherSet,added)=>lines.map((l,i)=>{const cls=l.trim()&&!otherSet.has(l)?(added?'added':'removed'):'unchanged';return `<div class="ir-line ${cls}"><span class="ln">${i+1}</span><span class="code">${esc(l)}</span></div>`}).join('');
 
-  const ms=[['instruction_count','Instr'],['basic_block_count','BBs'],['branch_count','Br'],['phi_count','PHI'],['call_count','Call'],['load_count','Load'],['store_count','Store']];
-  const metrics=ms.map(([k,l])=>{const d=e.metrics_after[k]-e.metrics_before[k];const cls=d<0?'neg':d>0?'pos':'';return `<div class="m"><span class="ml">${l}:</span><span class="mv">${e.metrics_before[k]}→${e.metrics_after[k]}</span><span class="md ${cls}">${d>0?'+':''}${d}</span></div>`}).join('');
-
+  CURRENT_DIFF_BEFORE=e.ir_before;
+  CURRENT_DIFF_AFTER=e.ir_after;
   document.getElementById('func-diff-area').innerHTML=`
     <div style="font-size:12px;font-weight:700;margin-bottom:8px;font-family:'JetBrains Mono',monospace;display:flex;align-items:center;gap:10px">${esc(e.pass_name)} <span style="color:var(--text-muted);font-weight:400">· IR diff</span><button class="ai-explain-btn" onclick="explainEvent(event,${e.id})">✨ Explain</button></div>
-    <div style="display:flex;gap:12px;margin-bottom:12px;font-size:11px">${metrics}</div>
+    <div style="display:flex;gap:12px;margin-bottom:12px;font-size:11px;flex-wrap:wrap">${metricChips(e)}</div>
     <div style="display:flex;gap:1px;border-radius:8px;overflow:hidden;border:1px solid var(--border)">
-      <div style="flex:1;overflow:auto;max-height:300px;background:var(--bg-primary)"><div style="font-size:9px;color:var(--text-muted);padding:8px 12px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;border-bottom:1px solid var(--border)">Before</div>${renderLines(bL,aS,false)}</div>
-      <div style="flex:1;overflow:auto;max-height:300px;background:var(--bg-primary)"><div style="font-size:9px;color:var(--text-muted);padding:8px 12px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;border-bottom:1px solid var(--border)">After</div>${renderLines(aL,bS,true)}</div>
+      <div style="flex:1;overflow:auto;max-height:300px;background:var(--bg-primary)"><div style="font-size:9px;color:var(--text-muted);padding:8px 12px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;border-bottom:1px solid var(--border)">Before <button class="ai-explain-btn" onclick="copyDiffBtn(this,'before')" title="Copy the full before-IR text to the clipboard">⧉ Copy</button></div>${renderLines(bL,aS,false)}</div>
+      <div style="flex:1;overflow:auto;max-height:300px;background:var(--bg-primary)"><div style="font-size:9px;color:var(--text-muted);padding:8px 12px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;border-bottom:1px solid var(--border)">After <button class="ai-explain-btn" onclick="copyDiffBtn(this,'after')" title="Copy the full after-IR text to the clipboard">⧉ Copy</button></div>${renderLines(aL,bS,true)}</div>
     </div>`;
 }
 function closeFuncModal(){document.getElementById('func-modal-bg').classList.remove('open')}
@@ -946,7 +952,7 @@ function renderTopPasses(){
   if(!D)return;const ch=D.events.filter(e=>e.event_type==='after'&&(e.has_changes||e.ir_changed));
   const bp={};for(const e of ch){const k=e.pass_name;if(!bp[k])bp[k]={name:k,iD:0,bD:0,count:0};bp[k].iD+=e.metrics_after.instruction_count-e.metrics_before.instruction_count;bp[k].bD+=e.metrics_after.basic_block_count-e.metrics_before.basic_block_count;bp[k].count++}
   const sorted=Object.values(bp).sort((a,b)=>a.iD-b.iD);
-  document.getElementById('top-passes-grid').innerHTML=sorted.map(p=>{const cls=p.iD<0?'neg':p.iD>0?'pos':'zero';return `<div class="top-card"><div><div class="tp-name">${esc(p.name)}</div><div class="tp-count">${p.count}×</div></div><div style="text-align:right"><div class="tp-delta ${cls}">${p.iD>0?'+':''}${p.iD}</div><div class="tp-sub">${p.bD>0?'+':''}${p.bD} BBs</div></div></div>`}).join('');
+  document.getElementById('top-passes-grid').innerHTML=sorted.map(p=>{const cls=p.iD<0?'neg':p.iD>0?'pos':'zero';return `<div class="top-card" title="${esc(p.name)}: summed across ${p.count} changing execution(s)"><div><div class="tp-name">${esc(p.name)}</div><div class="tp-count" title="Number of executions that changed the IR">${p.count}×</div></div><div style="text-align:right"><div class="tp-delta ${cls}" title="Total instruction delta">${p.iD>0?'+':''}${p.iD}</div><div class="tp-sub" title="Total basic-block delta">${p.bD>0?'+':''}${p.bD} BBs</div></div></div>`}).join('');
 }
 function renderEvents(){
   if(!D)return;const q=document.getElementById('search').value.toLowerCase();
@@ -971,7 +977,7 @@ function renderEvents(){
       else if(e.ir_changed)d='<span class="pos">IR modified · counters equal</span>';
       else d='<span class="nc">—</span>';
     }else if(e.event_type==='invalidated')d='<span class="nc">invalidated</span>';
-    return `<div class="ev ${rc}" ${canView?`onclick="openDiff(${e.id})"`:''}><span class="eid">${e.id}</span><span><span class="badge ${bc}">${e.event_type.slice(0,3)}</span></span><span class="pname"><span class="t-${e.pass_type}">${nest}${esc(e.pass_name)}</span></span><span class="iru">${e.ir_kind} ${esc(e.ir_name)}</span><span class="dep">${e.depth}</span><span class="dlt">${d}</span><span>${canView?`<button class="view-btn" title="View IR diff">⊕</button> <button class="ai-explain-btn" title="Ask AI about this change" onclick="explainEvent(event,${e.id})">✨</button>`:''}</span></div>`;
+    return `<div class="ev ${rc}" ${canView?`onclick="openDiff(${e.id})"`:''}><span class="eid">${e.id}</span><span><span class="badge ${bc}">${e.event_type.slice(0,3)}</span></span><span class="pname"><span class="t-${e.pass_type}">${nest}${esc(e.pass_name)}</span></span><span class="iru">${e.ir_kind} ${esc(e.ir_name)}</span><span class="dep">${e.depth}</span><span class="dlt" title="Per-metric changes for this pass (before → after); only metrics that moved are shown">${d}</span><span>${canView?`<button class="view-btn" title="View IR diff">⊕</button> <button class="ai-explain-btn" title="Ask AI about this change" onclick="explainEvent(event,${e.id})">✨</button>`:''}</span></div>`;
   }).join('');
   document.getElementById('events').innerHTML=html||'<div style="padding:50px;text-align:center;color:var(--text-muted)">No events match filter</div>';
 }
@@ -1123,15 +1129,14 @@ function openDiff(eid){
     return;
   }
   CURRENT_DIFF_ID=eid;
+  CURRENT_DIFF_BEFORE=e.ir_before;
+  CURRENT_DIFF_AFTER=e.ir_after;
   document.getElementById('modal-title').innerHTML=`<span class="hl">${esc(e.pass_name)}</span> · ${e.ir_kind} ${esc(e.ir_name)}`;
   const bL=e.ir_before.split('\n'),aL=e.ir_after.split('\n'),bS=new Set(bL),aS=new Set(aL);
   const render=(lines,otherSet,added)=>lines.map((l,i)=>{const cls=l.trim()&&!otherSet.has(l)?(added?'added':'removed'):'unchanged';return `<div class="ir-line ${cls}"><span class="ln">${i+1}</span><span class="code">${esc(l)}</span></div>`}).join('');
   document.getElementById('ir-before').innerHTML=render(bL,aS,false);
   document.getElementById('ir-after').innerHTML=render(aL,bS,true);
-  const ms=[['instruction_count','Instructions'],['basic_block_count','BBs'],['branch_count','Branches'],['phi_count','PHIs'],['call_count','Calls'],['load_count','Loads'],['store_count','Stores']];
-  const gs=[['op_arith','arith'],['op_cmp','cmp/sel/phi'],['op_memory','mem'],['op_control','ctrl'],['op_cast','cast'],['op_call','call'],['op_vector','vec'],['op_other','other']];
-  const ghtml=gs.map(([k,l])=>{const d=(e.metrics_after[k]||0)-(e.metrics_before[k]||0);if(!d)return '';const cls=d<0?'neg':d>0?'pos':'';return `<div class="m"><span class="ml">${l}:</span><span class="mv">${e.metrics_before[k]||0}→${e.metrics_after[k]||0}</span><span class="md ${cls}">${d>0?'+':''}${d}</span></div>`}).join('');
-  document.getElementById('modal-footer').innerHTML=ms.map(([k,l])=>{const d=(e.metrics_after[k]||0)-(e.metrics_before[k]||0);const cls=d<0?'neg':d>0?'pos':'';return `<div class="m"><span class="ml">${l}:</span><span class="mv">${e.metrics_before[k]||0} → ${e.metrics_after[k]||0}</span><span class="md ${cls}">${d>0?'+':''}${d}</span></div>`}).join('')+ghtml
+  document.getElementById('modal-footer').innerHTML=metricChips(e)
     +'<button class="ai-explain-btn" onclick="explainCurrentDiff()">✨ Explain this change</button>';
   document.getElementById('modal-bg').classList.add('open');
 }
@@ -1157,6 +1162,49 @@ function exportCSV(){
 
 // ===== UTILS =====
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+// Passes-with-IR-changes, with fallback for histories written before
+// passes_with_ir_changes existed (then it equals the metric count).
+function changedCount(s){return (s.passes_with_ir_changes==null)?s.passes_with_changes:s.passes_with_ir_changes}
+// Human-readable metric metadata: [short label, plain-English explanation].
+// Shared by every before → after readout so numbers explain themselves.
+const METRIC_INFO={
+ instruction_count:['Instructions','Total LLVM instructions in this code before → after the pass. Fewer usually means the pass deleted or folded code.'],
+ basic_block_count:['Basic blocks','Labeled code sections. Fewer usually means the pass merged or removed control flow.'],
+ branch_count:['Branches','Branch and switch terminators. Drops when control flow is simplified.'],
+ phi_count:['PHIs','SSA merge nodes where control-flow paths join with different values.'],
+ call_count:['Calls','Function calls (call / invoke). Drops when calls are inlined or removed.'],
+ load_count:['Loads','Memory reads. Drops when loads are eliminated or forwarded.'],
+ store_count:['Stores','Memory writes. Drops when dead stores are removed.'],
+ return_count:['Returns','Return terminators.'],
+ function_count:['Functions','Functions in the module.'],
+ global_count:['Globals','Module-level global variables.'],
+ op_arith:['Arith ops','Integer/float arithmetic and bitwise operations.'],
+ op_cmp:['Cmp/Sel/PHI','Comparisons, selects and PHI nodes (dataflow decisions).'],
+ op_memory:['Memory ops','Allocas, loads, stores, address math and atomics.'],
+ op_control:['Control ops','Terminator instructions: branches, returns, switches.'],
+ op_cast:['Cast ops','Type conversions between integer, float and pointer types.'],
+ op_call:['Call ops','Call, invoke and callbr instructions by opcode group.'],
+ op_vector:['Vector ops','Vector and aggregate element insert/extract/shuffle.'],
+ op_other:['Other ops','Landing pads, freeze, and miscellaneous instructions.']};
+// One row per metric: "Label: before → after (−1)". The change chip only
+// appears when the value actually moved (a bare "7 → 7" means no change).
+function metricChips(e){
+  return Object.keys(METRIC_INFO).map(k=>{
+    const b=(e.metrics_before&&e.metrics_before[k])||0,a=(e.metrics_after&&e.metrics_after[k])||0,d=a-b;
+    const info=METRIC_INFO[k];
+    const delta=d?` <span class="md ${d<0?'neg':'pos'}" title="Change made by this pass">(${d>0?'+':''}${d})</span>`:'';
+    return `<div class="m" title="${info[1]}"><span class="ml">${info[0]}:</span><span class="mv">${b} → ${a}</span>${delta}</div>`;
+  }).join('');
+}
+// Raw IR of the currently open diff, for the copy buttons.
+let CURRENT_DIFF_BEFORE='',CURRENT_DIFF_AFTER='';
+function copyDiffBtn(btn,side){
+  const txt=side==='before'?CURRENT_DIFF_BEFORE:CURRENT_DIFF_AFTER;
+  const done=()=>{const o=btn.textContent;btn.textContent='Copied ✓';setTimeout(()=>btn.textContent=o,1200)};
+  const fallback=()=>{const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');done()}catch(e){}document.body.removeChild(ta)};
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(done).catch(()=>fallback());
+  else fallback();
+}
 // Passes-with-IR-changes, with fallback for histories written before
 // passes_with_ir_changes existed (then it equals the metric count).
 function changedCount(s){return (s.passes_with_ir_changes==null)?s.passes_with_changes:s.passes_with_ir_changes}

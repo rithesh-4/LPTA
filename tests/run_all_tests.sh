@@ -412,6 +412,17 @@ sys.exit(1 if bad else 0)
 else
     echo "  [SKIP] input sweep (needs python3 + tests/count_ir.py)" | tee -a "$REPORT"
 fi
+
+# Test: headless dashboard smoke (node) against the snapshot report above
+if command -v node &>/dev/null && [ -f tests/dashboard_smoke.js ] && [ -f "$TMP_DIR/t_snap/history.json" ]; then
+    if node tests/dashboard_smoke.js "$TMP_DIR/t_snap/history.json" >>"$REPORT" 2>&1; then
+        pass "Dashboard smoke: render paths, diffs, copy, compare labels"
+    else
+        fail "Dashboard smoke: see $REPORT for failing check"
+    fi
+else
+    echo "  [SKIP] dashboard smoke (needs node + snapshot report)" | tee -a "$REPORT"
+fi
 echo "" | tee -a "$REPORT"
 
 # -------------------------------------------------------
