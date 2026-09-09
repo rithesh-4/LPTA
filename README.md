@@ -182,12 +182,19 @@ python serve_dashboard.py report -p 8080
 - Model/endpoint are switchable without code changes: `LPTA_AI_MODEL`, `LPTA_AI_BASE_URL`
   (any OpenAI-compatible endpoint works).
 - The panel supports free-text chat with markdown-formatted answers, a **stop button** for
-  in-flight generations, and **chat history**: conversations are kept per module+pipeline
-  (in the browser's localStorage), switchable via chips, with "＋ New chat" to start fresh.
+  in-flight generations, and optional per-module chat history. Browser persistence is off
+  by default; enable **Save chats locally** explicitly or use **Clear chats** to remove it.
 - Privacy: nothing leaves your machine until you click an AI control; requests carry only
-  aggregate metrics plus the IR excerpt of the single pass you asked about. The API key
-  stays in the server process environment — the browser never sees it.
+  aggregate metrics plus a bounded IR excerpt for the pass you asked about. That content
+  is sent to the server's configured AI provider and treated as untrusted compiler data;
+  the API key stays in the server process environment — the browser never sees it.
 - No key set → the panel shows setup instructions; everything else is unaffected.
+
+The bundled server is loopback-only by default. Remote binding requires both
+`--allow-remote` and `LPTA_ACCESS_TOKEN` (minimum 16 characters); enter any username and
+the token as the password in the browser's Basic Auth prompt. Put TLS and any stronger
+identity policy in a trusted reverse proxy. Remote mode serves only the dashboard and
+`history.json`, rate-limits API calls, and caps concurrent comparison/AI work.
 
 ### 4. Cross-Run Comparison (Regression Investigation)
 
@@ -297,6 +304,7 @@ bash tests/validate_correctness.sh build/ test.ll
 | `NVIDIA_API_KEY` | Enables AI Insights panel (**never committed** — keeps repo private) |
 | `LPTA_AI_MODEL` | Override model (default: `nvidia/nemotron-3-ultra-550b-a55b`) |
 | `LPTA_AI_BASE_URL` | Override endpoint (any OpenAI-compatible) |
+| `LPTA_ACCESS_TOKEN` | Required password for `--allow-remote` (minimum 16 characters) |
 
 **AI config file (std-lib only, no deps):** `serve_dashboard.py` loads `.lpta_config.json` from `cwd` then `home` (cwd wins), env vars override file. Example:
 ```json
@@ -390,7 +398,9 @@ cd report && python ../serve_dashboard.py . -p 8080
 Natural language summary of what the optimization pipeline did.
 
 ### Per-Function Impact
-Which functions were most optimized, sorted by instruction reduction.
+Function-scoped callback observations, with changed and total callback counts. These are
+not guaranteed whole-pipeline function totals because module/CGSCC effects can happen
+outside Function callbacks.
 
 ### Execution Timeline
 Visual chart showing pass execution over time with nesting depth.
@@ -411,7 +421,8 @@ Side-by-side before/after IR with:
 - Per-metric breakdown
 
 ### Top Passes by Impact
-Aggregated view showing which pass types had the most effect.
+Changed transformation callbacks ranked by observed metric delta. Nested effects may
+overlap, so this is evidence of observed change rather than proof of exclusive causality.
 
 ## Architecture
 
@@ -548,6 +559,10 @@ The C++ source code contains `assert()` statements that verify counting invarian
 ```bash
 bash tests/run_all_tests.sh build/   # Run full test suite
 ```
+
+CI uses the official LLVM 22.1.8 Windows MSVC archive with a pinned SHA-256,
+configures with `clang-cl`, then runs CTest, comparison golden/parity fixtures,
+and the dashboard smoke test.
 
 ## License
 

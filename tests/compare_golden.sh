@@ -164,5 +164,44 @@ PYEOF
     rm -f "$case_dir"/.cli.json "$case_dir"/.srv.json "$case_dir"/.cli.norm "$case_dir"/.srv.norm "$case_dir"/.cli.err "$case_dir"/.srv.err
 done
 
+MALFORMED="$BUILD_DIR/.malformed_history.json"
+python3 - "$GOLDEN_DIR/01_identical/base.json" "$MALFORMED" <<'PYEOF'
+import json, sys
+data = json.load(open(sys.argv[1]))
+after = next(e for e in data["events"] if e["event_type"] == "after")
+after["metrics_after"]["instruction_count"] = "not-a-number"
+json.dump(data, open(sys.argv[2], "w"), indent=2)
+PYEOF
+if "$EXE" --compare "$MALFORMED" "$GOLDEN_DIR/01_identical/curr.json" --json \
+    >/dev/null 2>"$BUILD_DIR/.malformed_cli.err"; then
+    fail "malformed history: CLI accepted an invalid metric"
+else
+    pass "malformed history: CLI rejects invalid metric types"
+fi
+if python3 - "$MALFORMED" "$GOLDEN_DIR/01_identical/curr.json" "$PORT" <<'PYEOF'
+import json, sys, urllib.error, urllib.request
+base = json.load(open(sys.argv[1]))
+curr = json.load(open(sys.argv[2]))
+req = urllib.request.Request(
+    f"http://127.0.0.1:{sys.argv[3]}/api/compare",
+    data=json.dumps({"base": base, "current": curr}).encode(),
+    headers={"Content-Type": "application/json"})
+try:
+    urllib.request.urlopen(req, timeout=30)
+except urllib.error.HTTPError as exc:
+    body = json.loads(exc.read())
+    assert exc.code == 400
+    assert body.get("error") == "invalid history schema"
+    assert body.get("details")
+else:
+    raise AssertionError("server accepted malformed history")
+PYEOF
+then
+    pass "malformed history: server returns structured validation errors"
+else
+    fail "malformed history: server validation contract failed"
+fi
+rm -f "$MALFORMED" "$BUILD_DIR/.malformed_cli.err"
+
 echo "=== Golden: $PASS passed, $FAIL failed ==="
 exit $FAIL

@@ -7,29 +7,95 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: windows-latest
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      LLVM_ROOT: C:/llvm-22.1.8/clang+llvm-22.1.8-x86_64-pc-windows-msvc
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install LLVM and Ninja
-        run: choco install llvm ninja -y --no-progress
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Provide python3 command for Git Bash tests
+        shell: bash
+        run: |
+          shim="$PWD/.ci-tools"
+          mkdir -p "$shim"
+          printf '#!/usr/bin/env bash\nexec python "$@"\n' >"$shim/python3"
+          chmod +x "$shim/python3"
+          cygpath -w "$shim" >>"$GITHUB_PATH"
+
+      - name: Cache LLVM
+        id: llvm-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\llvm-22.1.8
+          key: llvm-22.1.8-x86_64-pc-windows-msvc
+
+      - name: Download verified LLVM 22.1.8 archive
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
         shell: powershell
+        run: |
+          $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/clang%2Bllvm-22.1.8-x86_64-pc-windows-msvc.tar.xz"
+          $archive = Join-Path $env:RUNNER_TEMP "llvm.tar.xz"
+          $extract = Join-Path $env:RUNNER_TEMP "llvm-extract"
+          & curl.exe -L --fail --retry 3 --output $archive $url
+          if ($LASTEXITCODE -ne 0) { throw "failed to download LLVM archive" }
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          $expected = "d96c2cc1736f4eb7fa43cb9bbdf56d93551a9ae0a9aadb9c99c3c3b2b712a234"
+          if ($actual -ne $expected) { throw "LLVM archive checksum mismatch: $actual" }
+          New-Item -ItemType Directory -Force -Path $extract, "C:\llvm-22.1.8" | Out-Null
+          & "$env:ProgramFiles\7-Zip\7z.exe" x $archive "-o$extract" -y
+          if ($LASTEXITCODE -ne 0) { throw "failed to decompress LLVM archive" }
+          $tar = Get-ChildItem $extract -Filter *.tar | Select-Object -First 1
+          & "$env:ProgramFiles\7-Zip\7z.exe" x $tar.FullName "-oC:\llvm-22.1.8" -y
+          if ($LASTEXITCODE -ne 0) { throw "failed to extract LLVM archive" }
+
+      - name: Verify LLVM and install Ninja
+        shell: powershell
+        run: |
+          $config = Join-Path $env:LLVM_ROOT "lib\cmake\llvm\LLVMConfig.cmake"
+          $compiler = Join-Path $env:LLVM_ROOT "bin\clang-cl.exe"
+          if (!(Test-Path $config)) { throw "LLVMConfig.cmake not found at $config" }
+          if (!(Test-Path $compiler)) { throw "clang-cl.exe not found at $compiler" }
+          choco install ninja -y --no-progress
 
       - name: Configure
         run: >
           cmake -S . -B build -G Ninja
-          "-DLLVM_DIR=C:/Program Files/LLVM/lib/cmake/llvm"
+          "-DLLVM_DIR=${LLVM_ROOT}/lib/cmake/llvm"
+          "-DCMAKE_CXX_COMPILER=${LLVM_ROOT}/bin/clang-cl.exe"
 
       - name: Build
         run: cmake --build build
 
-      - name: Fast tests (unit + proof + cross-validation)
+      - name: CTest (unit + proof + cross-validation)
         run: |
-          export LLVM_DIR="C:/Program Files/LLVM"
+          export LLVM_DIR="$LLVM_ROOT"
           export PATH="$LLVM_DIR/bin:$PATH"
-          cd build && ctest --output-on-failure
+          ctest --test-dir build --output-on-failure
+
+      - name: Comparison golden fixtures and CLI/server parity
+        run: |
+          export LLVM_DIR="$LLVM_ROOT"
+          export PATH="$LLVM_DIR/bin:$PATH"
+          bash tests/compare_golden.sh build
+          bash tests/compare_parity.sh build
+
+      - name: Dashboard smoke test
+        run: |
+          export LLVM_DIR="$LLVM_ROOT"
+          export PATH="$LLVM_DIR/bin:$PATH"
+          ./build/lpta_test.exe tests/tiny_proof.ll ci_report -O2 --snapshots
+          node tests/dashboard_smoke.js ci_report/history.json
         # Full suite (300-iteration fuzz) stays manual/scheduled:
         #   bash tests/run_all_tests.sh build/

@@ -60,6 +60,7 @@ struct CompareEvent {
     unsigned id = 0;
     std::string event_type;
     std::string pass_name;
+    std::string pass_type;
     bool has_changes = false;
     bool ir_changed = false;
     unsigned instr_before = 0, instr_after = 0;
@@ -130,6 +131,84 @@ static bool parseJsonBool(const std::string &line, const std::string &key) {
     return line.compare(val, 4, "true") == 0;
 }
 
+static bool validateCompareJsonScalars(const std::string &path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        errs() << "ERROR: cannot open comparison file '" << path << "'\n";
+        return false;
+    }
+    static const std::set<std::string> countKeys = {
+        "schema_version", "id", "depth",
+        "instruction_count", "basic_block_count", "function_count",
+        "global_count", "call_count", "load_count", "store_count",
+        "branch_count", "phi_count", "return_count", "op_arith",
+        "op_cmp", "op_memory", "op_control", "op_cast", "op_call",
+        "op_vector", "op_other", "total_events", "total_before",
+        "total_after", "total_invalidated", "passes_with_changes",
+        "passes_with_ir_changes", "unique_pass_names",
+        "total_instructions_before", "total_instructions_after",
+        "total_bbs_before", "total_bbs_after",
+        "codegen_asm_lines_before", "codegen_asm_lines_after",
+        "codegen_asm_bytes_before", "codegen_asm_bytes_after",
+        "asm_lines_before", "asm_lines_after", "asm_bytes_before",
+        "asm_bytes_after", "optnone_function_count"
+    };
+    static const std::set<std::string> boolKeys = {
+        "snapshot_enabled", "has_changes", "ir_changed", "invalidated",
+        "optnone_detected", "optnone_stripped"
+    };
+    std::string line;
+    unsigned lineNo = 0;
+    while (std::getline(file, line)) {
+        lineNo++;
+        auto q1 = line.find('"');
+        if (q1 == std::string::npos) continue;
+        auto q2 = line.find('"', q1 + 1);
+        if (q2 == std::string::npos) continue;
+        std::string key = line.substr(q1 + 1, q2 - q1 - 1);
+        auto colon = line.find(':', q2 + 1);
+        if (colon == std::string::npos) continue;
+        auto valueStart = line.find_first_not_of(" \t", colon + 1);
+        if (valueStart == std::string::npos) continue;
+        auto valueEnd = line.find_first_of(",\r\n}", valueStart);
+        std::string value = trimWS(line.substr(
+            valueStart, valueEnd == std::string::npos
+                ? std::string::npos : valueEnd - valueStart));
+        bool valid = true;
+        if (countKeys.count(key)) {
+            try {
+                size_t used = 0;
+                long long parsed = std::stoll(value, &used);
+                valid = used == value.size() && parsed >= 0;
+            } catch (...) {
+                valid = false;
+            }
+        } else if (boolKeys.count(key)) {
+            valid = value == "true" || value == "false";
+        } else if (key == "event_type") {
+            std::string parsed = parseJsonString(line, key);
+            valid = parsed == "before" || parsed == "after" ||
+                    parsed == "invalidated";
+        } else if (key == "pass_type") {
+            std::string parsed = parseJsonString(line, key);
+            valid = parsed == "analysis" || parsed == "transformation" ||
+                    parsed == "adaptor" || parsed == "pipeline" ||
+                    parsed == "unknown";
+        } else if (key == "ir_kind") {
+            std::string parsed = parseJsonString(line, key);
+            valid = parsed == "Module" || parsed == "Function" ||
+                    parsed == "Loop" || parsed == "CGSCC" ||
+                    parsed == "Unknown";
+        }
+        if (!valid) {
+            errs() << "ERROR: invalid value for '" << key << "' in "
+                   << path << ":" << lineNo << "\n";
+            return false;
+        }
+    }
+    return true;
+}
+
 // Round to 1 decimal, half away from zero — must match the Python engine's
 // round1() exactly or parity fixtures fail on boundary percentages.
 static double round1(double x) { return std::round(x * 10.0) / 10.0; }
@@ -180,6 +259,10 @@ static long long pctDelta(long long old_val, long long new_val) {
 }
 
 static int compareJsonFiles(const std::string &basePath, const std::string &currPath) {
+    if (!validateCompareJsonScalars(basePath) ||
+        !validateCompareJsonScalars(currPath))
+        return 1;
+
     // --- Read and parse baseline ---
     std::ifstream baseFile(basePath);
     if (!baseFile.is_open()) {
@@ -335,6 +418,10 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                 if (line.find("\"pass_name\"") != std::string::npos) {
                     auto s = parseJsonString(line, "pass_name");
                     if (!s.empty()) ev.pass_name = s;
+                }
+                if (line.find("\"pass_type\"") != std::string::npos) {
+                    auto s = parseJsonString(line, "pass_type");
+                    if (!s.empty()) ev.pass_type = s;
                 }
                 if (line.find("\"has_changes\"") != std::string::npos) {
                     ev.has_changes = parseJsonBool(line, "has_changes");
@@ -569,6 +656,10 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                 if (line.find("\"pass_name\"") != std::string::npos) {
                     auto s = parseJsonString(line, "pass_name");
                     if (!s.empty()) ev.pass_name = s;
+                }
+                if (line.find("\"pass_type\"") != std::string::npos) {
+                    auto s = parseJsonString(line, "pass_type");
+                    if (!s.empty()) ev.pass_type = s;
                 }
                 if (line.find("\"has_changes\"") != std::string::npos) {
                     ev.has_changes = parseJsonBool(line, "has_changes");
@@ -864,7 +955,9 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                 e.event_type == "invalidated") {
                 execIds[e.pass_name].insert(e.id);
             }
-            if (e.event_type == "after" && (e.has_changes || e.ir_changed)) {
+            if (e.event_type == "after" &&
+                (e.pass_type.empty() || e.pass_type == "transformation") &&
+                (e.has_changes || e.ir_changed)) {
                 auto &a = aggs[e.pass_name];
                 a.count++;
                 a.instr_delta += (long long)e.instr_after - (long long)e.instr_before;

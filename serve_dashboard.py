@@ -29,16 +29,24 @@ Environment (override config file):
     LPTA_AI_MODEL      model id (default: nvidia/nemotron-3-ultra-550b-a55b)
     LPTA_AI_BASE_URL   OpenAI-compatible endpoint
                        (default: https://integrate.api.nvidia.com/v1)
+    LPTA_ACCESS_TOKEN  remote-mode password (minimum 16 characters)
 """
 
 import argparse
+import base64
+import hmac
 import json
+import math
 import os
 import sys
+import threading
+import time
 import urllib.error
 import urllib.request
+from collections import defaultdict, deque
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 
@@ -72,6 +80,127 @@ def load_config():
 
 
 SCHEMA_VERSION = 2
+COMPARE_METRICS = (
+    "instruction_count", "basic_block_count", "load_count",
+    "store_count", "branch_count", "phi_count",
+)
+
+
+def _count(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def validate_history(history, label="history"):
+    """Validate the fields consumed by comparison and return error strings."""
+    errors = []
+    if not isinstance(history, dict):
+        return [f"{label} must be an object"]
+    events = history.get("events")
+    summary = history.get("summary")
+    if not isinstance(events, list):
+        errors.append(f"{label}.events must be an array")
+    if not isinstance(summary, dict):
+        errors.append(f"{label}.summary must be an object")
+    if errors:
+        return errors
+    if not isinstance(history.get("module_name"), str) or \
+            not history["module_name"]:
+        errors.append(f"{label}.module_name must be a non-empty string")
+    if not isinstance(history.get("pipeline"), str) or not history["pipeline"]:
+        errors.append(f"{label}.pipeline must be a non-empty string")
+    if history.get("schema_version") is not None and \
+            not _count(history["schema_version"]):
+        errors.append(f"{label}.schema_version must be a non-negative integer")
+
+    for key in (
+        "total_events", "total_before", "total_after", "total_invalidated",
+        "passes_with_changes", "total_instructions_before",
+        "total_instructions_after", "total_bbs_before", "total_bbs_after",
+        "codegen_asm_lines_before", "codegen_asm_lines_after",
+        "codegen_asm_bytes_before", "codegen_asm_bytes_after",
+    ):
+        if not _count(summary.get(key)):
+            errors.append(f"{label}.summary.{key} must be a non-negative integer")
+    if summary.get("passes_with_ir_changes") is not None and \
+            not _count(summary["passes_with_ir_changes"]):
+        errors.append(f"{label}.summary.passes_with_ir_changes must be a non-negative integer")
+    targets = summary.get("codegen_targets", {})
+    if not isinstance(targets, dict):
+        errors.append(f"{label}.summary.codegen_targets must be an object")
+    else:
+        for target, result in targets.items():
+            path = f"{label}.summary.codegen_targets[{target!r}]"
+            if not isinstance(result, dict):
+                errors.append(f"{path} must be an object")
+                continue
+            error = result.get("error")
+            if error is not None:
+                if not isinstance(error, str):
+                    errors.append(f"{path}.error must be a string or null")
+                continue
+            for key in ("asm_lines_before", "asm_lines_after",
+                        "asm_bytes_before", "asm_bytes_after"):
+                if not _count(result.get(key)):
+                    errors.append(f"{path}.{key} must be a non-negative integer")
+
+    valid_event_types = {"before", "after", "invalidated"}
+    valid_pass_types = {"analysis", "transformation", "adaptor",
+                        "pipeline", "unknown"}
+    valid_ir_kinds = {"Module", "Function", "Loop", "CGSCC", "Unknown"}
+    for index, event in enumerate(events):
+        path = f"{label}.events[{index}]"
+        if not isinstance(event, dict):
+            errors.append(f"{path} must be an object")
+            continue
+        if event.get("event_type") not in valid_event_types:
+            errors.append(f"{path}.event_type is invalid")
+        if not isinstance(event.get("pass_name"), str):
+            errors.append(f"{path}.pass_name must be a string")
+        pass_type = event.get("pass_type")
+        if pass_type is not None and pass_type not in valid_pass_types:
+            errors.append(f"{path}.pass_type is invalid")
+        ir_kind = event.get("ir_kind")
+        if ir_kind not in valid_ir_kinds:
+            errors.append(f"{path}.ir_kind is invalid")
+        if not isinstance(event.get("ir_name"), str):
+            errors.append(f"{path}.ir_name must be a string")
+        if not _count(event.get("id")):
+            errors.append(f"{path}.id must be a non-negative integer")
+        if not _count(event.get("depth")):
+            errors.append(f"{path}.depth must be a non-negative integer")
+        event_type = event.get("event_type")
+        if event_type == "after":
+            if not isinstance(event.get("has_changes"), bool):
+                errors.append(f"{path}.has_changes must be boolean")
+            if event.get("ir_changed") is not None and \
+                    not isinstance(event["ir_changed"], bool):
+                errors.append(f"{path}.ir_changed must be boolean")
+            before_snapshot = event.get("ir_before")
+            after_snapshot = event.get("ir_after")
+            if before_snapshot is not None and \
+                    not isinstance(before_snapshot, str):
+                errors.append(f"{path}.ir_before must be a string or null")
+            if after_snapshot is not None and \
+                    not isinstance(after_snapshot, str):
+                errors.append(f"{path}.ir_after must be a string or null")
+            if isinstance(before_snapshot, str) != isinstance(after_snapshot, str):
+                errors.append(f"{path} snapshot pair is incomplete")
+            sides = ("metrics_before", "metrics_after")
+        else:
+            sides = ("metrics",)
+        for side in sides:
+            metrics = event.get(side)
+            if not isinstance(metrics, dict):
+                errors.append(f"{path}.{side} must be an object")
+                continue
+            for key in COMPARE_METRICS:
+                if not _count(metrics.get(key)):
+                    errors.append(
+                        f"{path}.{side}.{key} must be a non-negative integer")
+        if len(errors) >= 25:
+            errors.append(f"{label} has additional validation errors")
+            break
+    return errors
 
 
 def check_compat(base, curr, allow_different_input=False):
@@ -131,6 +260,10 @@ def compare_histories(base, curr, allow_different_input=False):
     verdict "improved"; any regression yields a positive proportional score.
     Incomparable inputs return verdict "incomparable" with a null score.
     """
+    validation_errors = validate_history(base, "base") + \
+        validate_history(curr, "current")
+    if validation_errors:
+        raise ValueError("invalid history schema: " + "; ".join(validation_errors[:8]))
     compat = check_compat(base, curr, allow_different_input)
     if compat["blocked"]:
         return {
@@ -187,7 +320,6 @@ def compare_histories(base, curr, allow_different_input=False):
         "codegen_asm_lines_after": diff(sb.get("codegen_asm_lines_after", 0), sc.get("codegen_asm_lines_after", 0)),
         "codegen_asm_bytes_before": diff(sb.get("codegen_asm_bytes_before", 0), sc.get("codegen_asm_bytes_before", 0)),
         "codegen_asm_bytes_after": diff(sb.get("codegen_asm_bytes_after", 0), sc.get("codegen_asm_bytes_after", 0)),
-        "passes_with_ir_changes": diff(sb.get("passes_with_ir_changes", 0), sc.get("passes_with_ir_changes", 0)),
     }
 
     # Instruction/codegen reduction deltas and efficiency
@@ -237,11 +369,19 @@ def compare_histories(base, curr, allow_different_input=False):
         d["branch_delta"] += ma.get("branch_count", 0) - mb.get("branch_count", 0)
         d["phi_delta"] += ma.get("phi_count", 0) - mb.get("phi_count", 0)
 
+    def _is_direct_effect(e):
+        # Schema-1 reports may not have pass_type; preserve their historical
+        # behavior. Schema-2 reports attribute effect only to transformations,
+        # not to enclosing adaptors/pipeline intervals.
+        return e.get("pass_type") in (None, "transformation")
+
     for e in base.get("events", []):
-        if e.get("event_type") == "after" and (e.get("has_changes") or e.get("ir_changed")):
+        if e.get("event_type") == "after" and _is_direct_effect(e) and \
+                (e.get("has_changes") or e.get("ir_changed")):
             _accumulate_pass(base_passes, e)
     for e in curr.get("events", []):
-        if e.get("event_type") == "after" and (e.get("has_changes") or e.get("ir_changed")):
+        if e.get("event_type") == "after" and _is_direct_effect(e) and \
+                (e.get("has_changes") or e.get("ir_changed")):
             _accumulate_pass(curr_passes, e)
 
     def _exec_ids(events):
@@ -623,10 +763,19 @@ class LPTAHandler(SimpleHTTPRequestHandler):
     ai_base_url = DEFAULT_BASE_URL
     ai_model = DEFAULT_MODEL
     ai_key = None
+    access_token = None
+    require_auth = False
+    ai_slots = threading.BoundedSemaphore(2)
+    compare_slots = threading.BoundedSemaphore(2)
+    rate_lock = threading.Lock()
+    rate_events = defaultdict(deque)
 
     def do_GET(self):
         self._csp_sent = False
-        if self.path == "/api/health":
+        if not self._authorized():
+            return self._send_auth_required()
+        path = urlsplit(self.path).path
+        if path == "/api/health":
             valid_key = _is_valid_nvidia_key(self.ai_key)
             body = {
                 "static": True,
@@ -634,9 +783,13 @@ class LPTAHandler(SimpleHTTPRequestHandler):
                 "model": self.ai_model if valid_key else None,
             }
             return self._send_json(200, body)
+        if path not in ("/", "/index.html", "/dashboard.html", "/history.json"):
+            return self.send_error(404, "Not found")
         return super().do_GET()
 
     def do_OPTIONS(self):
+        if not self._authorized():
+            return self._send_auth_required()
         # No Access-Control-Allow-Origin: the dashboard is same-origin, and
         # wildcard CORS would let any site drive the AI proxy with the
         # operator's credential.
@@ -648,11 +801,18 @@ class LPTAHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         self._csp_sent = False
-        if self.path == "/api/compare":
+        if not self._authorized():
+            return self._send_auth_required()
+        path = urlsplit(self.path).path
+        if path == "/api/compare":
+            if not self._allow_rate("compare", 30, 60):
+                return self._send_json(429, {"error": "compare rate limit exceeded"})
             return self._handle_compare()
 
-        if self.path != "/api/chat":
-            return self._send_json(404, {"error": f"unknown endpoint {self.path}"})
+        if path != "/api/chat":
+            return self._send_json(404, {"error": f"unknown endpoint {path}"})
+        if not self._allow_rate("chat", 10, 60):
+            return self._send_json(429, {"error": "AI request rate limit exceeded"})
 
         if not self.ai_key:
             return self._send_json(501, {
@@ -731,20 +891,61 @@ class LPTAHandler(SimpleHTTPRequestHandler):
             },
             method="POST",
         )
+        if not self.ai_slots.acquire(blocking=False):
+            return self._send_json(429, {"error": "AI request concurrency limit reached"})
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                return self._send_json(resp.status, json.loads(resp.read().decode("utf-8")))
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", errors="replace")
             try:
-                detail = json.loads(detail)
-            except json.JSONDecodeError:
-                detail = {"error": detail[:500]}
-            return self._send_json(e.code, detail)
-        except urllib.error.URLError as e:
-            return self._send_json(502, {"error": f"upstream unreachable: {e.reason}"})
-        except OSError as e:  # read timeouts (socket.timeout) and dropped connections
-            return self._send_json(502, {"error": f"upstream I/O failure: {e}"})
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    return self._send_json(resp.status, json.loads(resp.read().decode("utf-8")))
+            except urllib.error.HTTPError as e:
+                detail = e.read().decode("utf-8", errors="replace")
+                try:
+                    detail = json.loads(detail)
+                except json.JSONDecodeError:
+                    detail = {"error": detail[:500]}
+                return self._send_json(e.code, detail)
+            except urllib.error.URLError as e:
+                return self._send_json(502, {"error": f"upstream unreachable: {e.reason}"})
+            except OSError as e:  # read timeouts and dropped connections
+                return self._send_json(502, {"error": f"upstream I/O failure: {e}"})
+        finally:
+            self.ai_slots.release()
+
+    def _authorized(self):
+        if not self.require_auth:
+            return True
+        auth = self.headers.get("Authorization", "")
+        candidate = ""
+        if auth.startswith("Bearer "):
+            candidate = auth[7:]
+        elif auth.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(auth[6:], validate=True).decode("utf-8")
+                candidate = decoded.partition(":")[2]
+            except (ValueError, UnicodeDecodeError):
+                return False
+        return bool(candidate) and hmac.compare_digest(candidate, self.access_token or "")
+
+    def _send_auth_required(self):
+        data = b"Authentication required"
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="LPTA", charset="UTF-8"')
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _allow_rate(self, endpoint, limit, window):
+        key = (self.client_address[0], endpoint)
+        now = time.monotonic()
+        with self.rate_lock:
+            events = self.rate_events[key]
+            while events and now - events[0] >= window:
+                events.popleft()
+            if len(events) >= limit:
+                return False
+            events.append(now)
+            return True
 
     def _read_body(self):
         """Read the POST body, enforcing MAX_BODY_BYTES. Returns bytes or
@@ -789,6 +990,9 @@ class LPTAHandler(SimpleHTTPRequestHandler):
                 "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
                 "font-src 'self' https://fonts.gstatic.com; "
                 "img-src 'self' data:; connect-src 'self'")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Frame-Options", "DENY")
         super().end_headers()
 
     def _handle_compare(self):
@@ -822,12 +1026,24 @@ class LPTAHandler(SimpleHTTPRequestHandler):
             return self._send_json(400, {
                 "error": "body 'base' and 'current' must be history.json objects (or JSON strings)"})
 
+        validation_errors = validate_history(base, "base") + \
+            validate_history(curr, "current")
+        if validation_errors:
+            return self._send_json(400, {
+                "error": "invalid history schema",
+                "details": validation_errors[:25],
+            })
+
         allow_input = payload.get("allow_different_input", False) is True
+        if not self.compare_slots.acquire(blocking=False):
+            return self._send_json(429, {"error": "comparison concurrency limit reached"})
         try:
             result = compare_histories(base, curr, allow_different_input=allow_input)
             return self._send_json(200, result)
-        except Exception as e:
-            return self._send_json(500, {"error": f"comparison failed: {e}"})
+        except Exception:
+            return self._send_json(500, {"error": "comparison failed"})
+        finally:
+            self.compare_slots.release()
 
     def log_message(self, fmt, *args):
         sys.stderr.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
@@ -840,8 +1056,8 @@ def serve():
     ap.add_argument("--host", default="127.0.0.1", help="bind address (default: 127.0.0.1)")
     ap.add_argument("--allow-remote", action="store_true",
                     help="permit binding a non-loopback address. Reports contain "
-                         "source IR and the server spends your AI credential: "
-                         "only use on networks you trust.")
+                         "source IR and the server spends your AI credential. "
+                         "Requires LPTA_ACCESS_TOKEN.")
     args = ap.parse_args()
 
     if args.host not in ("127.0.0.1", "localhost", "::1") and not args.allow_remote:
@@ -854,20 +1070,27 @@ def serve():
 
     # Load config file (checked first)
     config = load_config()
+    remote = args.host not in ("127.0.0.1", "localhost", "::1")
+    access_token = os.environ.get("LPTA_ACCESS_TOKEN") or config.get("LPTA_ACCESS_TOKEN")
+    if remote and (not access_token or len(access_token) < 16):
+        sys.exit("error: remote mode requires LPTA_ACCESS_TOKEN with at least "
+                 "16 characters; use the browser's Basic Auth prompt")
 
     # Priority: env var > config file > default
     LPTAHandler.ai_key = os.environ.get("NVIDIA_API_KEY") or config.get("NVIDIA_API_KEY")
     LPTAHandler.ai_model = os.environ.get("LPTA_AI_MODEL") or config.get("LPTA_AI_MODEL", DEFAULT_MODEL)
     LPTAHandler.ai_base_url = os.environ.get("LPTA_AI_BASE_URL") or config.get("LPTA_AI_BASE_URL", DEFAULT_BASE_URL)
+    LPTAHandler.access_token = access_token
+    LPTAHandler.require_auth = remote
 
     LPTAHandler.directory = os.path.abspath(args.directory)
     os.chdir(LPTAHandler.directory)
 
     server = ThreadingHTTPServer((args.host, args.port), LPTAHandler)
     print(f"  Serving '{LPTAHandler.directory}' at http://{args.host}:{args.port}")
-    if args.allow_remote:
-        print("  WARNING: --allow-remote: reachable clients can read reports "
-              "and spend your AI credential. Trust this network.")
+    if remote:
+        print("  Remote access: token authentication enabled. Use TLS through "
+              "a trusted reverse proxy.")
     if LPTAHandler.ai_key:
         print(f"  AI Insights: ON  (model: {LPTAHandler.ai_model})")
     else:

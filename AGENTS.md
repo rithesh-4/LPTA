@@ -19,6 +19,10 @@ Instrumentation tool (**not** upstream LLVM source): runs the `opt` pipeline on 
   ```
   cmake -G Ninja -DLLVM_DIR=C:/LLVM-full/clang+llvm-22.1.8-x86_64-pc-windows-msvc/lib/cmake/llvm -DCMAKE_CXX_COMPILER=C:/LLVM-full/clang+llvm-22.1.8-x86_64-pc-windows-msvc/bin/clang-cl.exe ..
   ```
+- CI downloads the official LLVM 22.1.8 Windows MSVC archive, verifies SHA-256
+  `d96c2cc1736f4eb7fa43cb9bbdf56d93551a9ae0a9aadb9c99c3c3b2b712a234`,
+  configures with its `clang-cl`, then runs CTest, comparison golden/parity,
+  and dashboard smoke tests.
 - One-command: `bash run_lpta.sh input.ll` (env overrides: `BUILD_DIR`, `REPORT_DIR`; auto-detects `LLVM_DIR` via `llvm-config`)
 - Direct:
   ```

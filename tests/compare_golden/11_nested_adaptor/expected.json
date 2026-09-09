@@ -1,11 +1,11 @@
 {
   "blocked": false,
   "cli_rc": 0,
-  "improvements": 1,
+  "improvements": 0,
   "pass_status": {
     "AdaptPass": [
       "present_in_both",
-      "newly_effectful"
+      "unchanged_effect"
     ],
     "ChildPass": [
       "added",
@@ -15,5 +15,5 @@
   "regressions": 1,
   "score": 0,
   "target_states": {},
-  "verdict": "improved"
+  "verdict": "unchanged"
 }
