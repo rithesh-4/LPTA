@@ -33,6 +33,7 @@ C:\LLVM-full\
 │   ├── run_all_tests.sh        ← units + edge + fuzz + judge_proof + validate (slow)
 │   ├── judge_proof.sh          ← fast ground-truth proof (tiny_proof.ll)
 │   ├── validate_correctness.sh ← independent recount + opt -stats cross-validation
+│   ├── compare_parity.sh       ← CLI --compare vs server /api/compare agreement
 │   ├── fuzz_runner.sh          ← 300 mutated inputs, no crash/hang/corrupt allowed
 │   ├── test_utilities.cpp      ← unit tests → build/test_utilities.exe
 │   ├── dashboard_smoke.js      ← headless dashboard checks (node, no browser)

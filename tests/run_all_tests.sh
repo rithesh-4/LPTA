@@ -543,6 +543,18 @@ else
 fi
 echo "" | tee -a "$REPORT"
 
+echo "Phase 7: Compare parity (CLI vs server)" | tee -a "$REPORT"
+if [ -f "$SCRIPT_DIR/compare_parity.sh" ]; then
+    if bash "$SCRIPT_DIR/compare_parity.sh" "$BUILD_DIR" >>"$REPORT" 2>&1; then
+        pass "compare_parity.sh: CLI and server agree"
+    else
+        fail "compare_parity.sh failed (see above in $REPORT)"
+    fi
+else
+    echo "  [SKIP] compare_parity.sh not found" | tee -a "$REPORT"
+fi
+echo "" | tee -a "$REPORT"
+
 # -------------------------------------------------------
 # Summary
 # -------------------------------------------------------
