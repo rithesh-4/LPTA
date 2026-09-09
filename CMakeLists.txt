@@ -113,3 +113,37 @@ add_executable(
 
 target_include_directories(test_utilities PRIVATE ${LLVM_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/inc)
 target_link_libraries(test_utilities PRIVATE ${LLVM_LIBS})
+
+# ------------------------------------------------------------
+# CTest: fast checks run on every build; the slow shell suite
+# (fuzz) stays in tests/run_all_tests.sh for scheduled runs.
+# ------------------------------------------------------------
+
+enable_testing()
+
+add_test(NAME unit COMMAND test_utilities)
+
+# Prefer Git Bash on Windows: WSL bash cannot run C:/-style script paths
+# that the suite relies on.
+if(WIN32)
+    # $ENV{...} names cannot contain parens, so build the x86 path indirectly.
+    set(_git_x86 "$ENV{SystemDrive}/Program Files (x86)/Git/bin")
+    find_program(BASH_EXE bash
+        PATHS
+            "$ENV{ProgramFiles}/Git/bin"
+            "${_git_x86}"
+            "C:/Program Files/Git/bin"
+        NO_DEFAULT_PATH)
+endif()
+if(NOT BASH_EXE)
+    find_program(BASH_EXE bash)
+endif()
+if(BASH_EXE)
+    add_test(NAME judge_proof
+        COMMAND ${BASH_EXE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/judge_proof.sh ${CMAKE_BINARY_DIR})
+    add_test(NAME validate_correctness
+        COMMAND ${BASH_EXE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/validate_correctness.sh ${CMAKE_BINARY_DIR} test.ll)
+    # run shell suites from the repo root (scripts use relative paths)
+    set_tests_properties(judge_proof validate_correctness
+        PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endif()

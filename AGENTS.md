@@ -32,6 +32,7 @@ Instrumentation tool (**not** upstream LLVM source): runs the `opt` pipeline on 
 
 ## Tests — bash only (Git Bash/MSYS)
 
+- Fast gate: `ctest --test-dir build` (unit + judge_proof + validate_correctness; needs Git Bash — CMake prefers it over WSL bash on Windows)
 - Full suite (minutes, 300-iteration fuzz): `bash tests/run_all_tests.sh build/`
 - Fast correctness: `bash tests/judge_proof.sh build/` (hand-verified `tests/tiny_proof.ll`)
 - Independent cross-validation: `bash tests/validate_correctness.sh build/ test.ll` (grep counting + `opt -stats`)
