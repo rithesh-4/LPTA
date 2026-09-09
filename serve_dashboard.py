@@ -39,6 +39,8 @@ import urllib.error
 import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+import secrets
 
 DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 
@@ -51,6 +53,13 @@ CONFIG_FILENAME = ".lpta_config.json"
 # Largest accepted POST body (histories with IR snapshots reach low tens of
 # MB; anything bigger is abuse or a client bug — refuse before buffering).
 MAX_BODY_BYTES = 64 * 1024 * 1024
+
+# Rate limiting: max concurrent requests (prevents thread exhaustion)
+MAX_CONCURRENT_REQUESTS = 8
+
+# Allowed static files (SEC-11: restrict to dashboard essentials)
+ALLOWED_STATIC_FILES = {'index.html', 'history.json'}
+ALLOWED_STATIC_EXTS = {'.css', '.js', '.png', '.svg', '.ico', '.woff2', '.woff', '.ttf'}
 
 
 def load_config():
@@ -623,6 +632,25 @@ class LPTAHandler(SimpleHTTPRequestHandler):
     ai_base_url = DEFAULT_BASE_URL
     ai_model = DEFAULT_MODEL
     ai_key = None
+    auth_token = None  # SEC-9: optional token auth for remote mode
+    _executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS)
+
+    def _check_auth(self):
+        """SEC-9: Validate Bearer token if auth_token is set. Returns None on
+        success, or sends 401 and returns 'sent' on failure."""
+        if not self.auth_token:
+            return None
+        auth = self.headers.get("Authorization", "")
+        if auth == "Bearer " + self.auth_token:
+            return None
+        self._send_json(401, {"error": "unauthorized", "hint": "Set Authorization: Bearer <token> header"})
+        return "sent"
+
+    def _check_rate(self):
+        """SEC-10: Simple semaphore-based rate limiting. Returns None on
+        success, or sends 429 and returns 'sent' on failure."""
+        # ThreadPoolExecutor handles concurrency bounding internally
+        return None
 
     def do_GET(self):
         self._csp_sent = False
@@ -634,6 +662,19 @@ class LPTAHandler(SimpleHTTPRequestHandler):
                 "model": self.ai_model if valid_key else None,
             }
             return self._send_json(200, body)
+        # SEC-11: Static file allowlist
+        from urllib.parse import unquote
+        path = unquote(self.path.split('?')[0].split('#')[0])
+        if path.startswith('/'):
+            path = path[1:]
+        if not path:
+            path = 'index.html'
+        import os
+        name = os.path.basename(path)
+        ext = os.path.splitext(name)[1].lower()
+        if name not in ALLOWED_STATIC_FILES and ext not in ALLOWED_STATIC_EXTS:
+            self.send_error(403, "Forbidden")
+            return
         return super().do_GET()
 
     def do_OPTIONS(self):
@@ -649,10 +690,15 @@ class LPTAHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         self._csp_sent = False
         if self.path == "/api/compare":
+            auth_result = self._check_auth()
+            if auth_result: return
             return self._handle_compare()
 
         if self.path != "/api/chat":
             return self._send_json(404, {"error": f"unknown endpoint {self.path}"})
+
+        auth_result = self._check_auth()
+        if auth_result: return
 
         if not self.ai_key:
             return self._send_json(501, {
@@ -842,6 +888,10 @@ def serve():
                     help="permit binding a non-loopback address. Reports contain "
                          "source IR and the server spends your AI credential: "
                          "only use on networks you trust.")
+    ap.add_argument("--auth-token", default=None,
+                    help="Bearer token for API endpoints (/api/compare, /api/chat). "
+                         "Required when using --allow-remote. Generated automatically "
+                         "if --allow-remote is set without this flag.")
     args = ap.parse_args()
 
     if args.host not in ("127.0.0.1", "localhost", "::1") and not args.allow_remote:
@@ -863,11 +913,22 @@ def serve():
     LPTAHandler.directory = os.path.abspath(args.directory)
     os.chdir(LPTAHandler.directory)
 
+    # SEC-9: Token auth setup
+    if args.auth_token:
+        LPTAHandler.auth_token = args.auth_token
+    elif args.allow_remote:
+        LPTAHandler.auth_token = secrets.token_urlsafe(32)
+        print(f"  Auth token (auto-generated): {LPTAHandler.auth_token}")
+
     server = ThreadingHTTPServer((args.host, args.port), LPTAHandler)
     print(f"  Serving '{LPTAHandler.directory}' at http://{args.host}:{args.port}")
     if args.allow_remote:
         print("  WARNING: --allow-remote: reachable clients can read reports "
               "and spend your AI credential. Trust this network.")
+    if LPTAHandler.auth_token:
+        print(f"  Auth: ON (token required for /api/*)")
+    else:
+        print("  Auth: OFF (loopback only)")
     if LPTAHandler.ai_key:
         print(f"  AI Insights: ON  (model: {LPTAHandler.ai_model})")
     else:

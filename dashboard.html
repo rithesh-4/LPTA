@@ -878,28 +878,45 @@ function renderOverviewCharts(){
 
 // ===== FUNCTIONS =====
 function renderFunctions(){
-  if(!D)return;const fm={};
-  for(const e of D.events){
-    if(e.ir_kind!=='Function'||!isCompleted(e)||!hasAnyIRChange(e))continue;
-    const n=e.ir_name;
-    const ib=e.metrics_before?.instruction_count, ia=e.metrics_after?.instruction_count;
-    const bb=e.metrics_before?.basic_block_count, ba=e.metrics_after?.basic_block_count;
-    if(ib==null&&ia==null)continue;
-    if(!fm[n])fm[n]={before:ib??0,after:ia??0,passes:0,bbs_before:bb??0,bbs_after:ba??0};
-    fm[n].after=ia??fm[n].after;fm[n].bbs_after=ba??fm[n].bbs_after;fm[n].passes++;
+  if(!D)return;
+  // Prefer whole-pipeline function summaries when available (schema 2+)
+  const fs=D.summary?.function_summaries;
+  let funcs;
+  if(fs&&Object.keys(fs).length){
+    funcs=Object.entries(fs).map(([n,m])=>{
+      const ib=m.initial_metrics?.instruction_count??0, ia=m.final_metrics?.instruction_count??0;
+      const bb=m.initial_metrics?.basic_block_count??0, ba=m.final_metrics?.basic_block_count??0;
+      // Count changing callbacks from events for this function
+      const passes=D.events.filter(e=>e.ir_kind==='Function'&&e.ir_name===n&&hasAnyIRChange(e)).length;
+      return{name:n,before:ib,after:ia,delta:ia-ib,passes:passes||1,pct:ib?Math.round((ib-ia)/ib*100):0,bbs_before:bb,bbs_after:ba};
+    }).sort((a,b)=>a.delta-b.delta);
+  }else{
+    // Fallback: callback-scoped aggregation (schema 1)
+    const fm={};
+    for(const e of D.events){
+      if(e.ir_kind!=='Function'||!isCompleted(e)||!hasAnyIRChange(e))continue;
+      const n=e.ir_name;
+      const ib=e.metrics_before?.instruction_count, ia=e.metrics_after?.instruction_count;
+      const bb=e.metrics_before?.basic_block_count, ba=e.metrics_after?.basic_block_count;
+      if(ib==null&&ia==null)continue;
+      if(!fm[n])fm[n]={before:ib??0,after:ia??0,passes:0,bbs_before:bb??0,bbs_after:ba??0};
+      fm[n].after=ia??fm[n].after;fm[n].bbs_after=ba??fm[n].bbs_after;fm[n].passes++;
+    }
+    funcs=Object.entries(fm).map(([n,m])=>({name:n,before:m.before,after:m.after,delta:m.after-m.before,passes:m.passes,pct:m.before?Math.round((m.before-m.after)/m.before*100):0,bbs_before:m.bbs_before,bbs_after:m.bbs_after})).sort((a,b)=>a.delta-b.delta);
   }
-  const funcs=Object.entries(fm).map(([n,m])=>({name:n,before:m.before,after:m.after,delta:m.after-m.before,passes:m.passes,pct:m.before?Math.round((m.before-m.after)/m.before*100):0,bbs_before:m.bbs_before,bbs_after:m.bbs_after})).sort((a,b)=>a.delta-b.delta);
+  const hasSummaries=!!fs;
+  const labelSuffix=hasSummaries?'whole-pipeline':'callback-scoped';
   if(!funcs.length){document.getElementById('func-grid').innerHTML='<div style="padding:60px;text-align:center;color:var(--text-muted)">No function-level changes detected</div>';return}
   const mx=Math.max(...funcs.map(f=>f.before));
   document.getElementById('func-grid').innerHTML=funcs.map((f,i)=>{
     const cls=f.delta<0?'positive':f.delta>0?'negative':'zero';
-    return `<div class="func-card reveal stagger-${(i%6)+1}" data-func="${esc(f.name)}" onclick="openFuncDetail(this.dataset.func)" title="Function ${esc(f.name)} — click to explore every pass execution on it">
-      <div class="func-head"><div class="func-name">${esc(f.name)}</div><div class="func-delta ${cls}" title="Function-scoped delta: first changed callback → last changed callback">${f.delta>0?'+':''}${f.delta}</div></div>
-      <div class="func-meta" title="Share of instructions changed (function-scoped callback delta) relative to before">${f.pct}% function-scoped delta · ${f.passes} callbacks</div>
+    return `<div class="func-card reveal stagger-${(i%6)+1}" data-func="${esc(f.name)}" onclick="openFuncDetail(this.dataset.func)" title="Function ${esc(f.name)} — ${labelSuffix} delta">
+      <div class="func-head"><div class="func-name">${esc(f.name)}</div><div class="func-delta ${cls}" title="${labelSuffix} instruction delta">${f.delta>0?'+':''}${f.delta}</div></div>
+      <div class="func-meta" title="Share of instructions changed (${labelSuffix}) relative to before">${f.pct}% ${labelSuffix} delta · ${f.passes} callbacks</div>
       <div class="func-bar-outer"><div class="func-bar-inner ${f.delta<=0?'green':'red'}" style="width:0%" data-width="${mx?f.before/mx*100:0}%"></div></div>
       <div class="func-stats">
-        <div class="func-stat" title="Instructions: first → last changing callback">Instr: <span>${f.before} → ${f.after}</span></div>
-        <div class="func-stat" title="BBs: first → last changing callback">BBs: <span>${f.bbs_before} → ${f.bbs_after}</span></div>
+        <div class="func-stat" title="Instructions: ${labelSuffix} before → after">Instr: <span>${f.before} → ${f.after}</span></div>
+        <div class="func-stat" title="BBs: ${labelSuffix} before → after">BBs: <span>${f.bbs_before} → ${f.bbs_after}</span></div>
       </div>
       <div class="func-click">Click to explore →</div>
     </div>`}).join('');
@@ -1038,9 +1055,11 @@ function renderTopPasses(){
   const sorted=Object.values(bp).sort((a,b)=>a.iD-b.iD);
   document.getElementById('top-passes-grid').innerHTML=sorted.map(p=>{const cls=p.iD<0?'neg':p.iD>0?'pos':'zero';return `<div class="top-card" title="${esc(p.name)}: summed across ${p.count} changing transformation execution(s)"><div><div class="tp-name">${esc(p.name)}</div><div class="tp-count" title="Number of transformation executions that changed the IR">${p.count}×</div></div><div style="text-align:right"><div class="tp-delta ${cls}" title="Total instruction delta">${p.iD>0?'+':''}${p.iD}</div><div class="tp-sub" title="Total basic-block delta">${p.bD>0?'+':''}${p.bD} BBs</div></div></div>`}).join('');
 }
+const VIRTUAL_PAGE_SIZE=200;
+let _filteredEvents=[],_virtualOffset=0,_virtualObserver=null;
 function renderEvents(){
   if(!D)return;const q=document.getElementById('search').value.toLowerCase();
-  const evts=D.events.filter(e=>{
+  _filteredEvents=D.events.filter(e=>{
     if(F==='changed'&&e.event_type==='after'&&!(e.has_changes||e.ir_changed))return false;
     if(F==='Module'&&e.ir_kind!=='Module')return false;
     if(F==='Function'&&e.ir_kind!=='Function')return false;
@@ -1050,7 +1069,22 @@ function renderEvents(){
     if(q&&!e.pass_name.toLowerCase().includes(q)&&!e.ir_name.toLowerCase().includes(q))return false;
     return true;
   });
-  const html=evts.map(e=>{
+  _virtualOffset=0;
+  const el=document.getElementById('events');
+  if(!_filteredEvents.length){el.innerHTML='<div style="padding:50px;text-align:center;color:var(--text-muted)">No events match filter</div>';return}
+  // Render first page + sentinel
+  el.innerHTML=renderEventSlice(0,Math.min(VIRTUAL_PAGE_SIZE,_filteredEvents.length));
+  if(_filteredEvents.length>VIRTUAL_PAGE_SIZE){
+    el.innerHTML+='<div id="events-sentinel" style="height:1px"></div>';
+    if(_virtualObserver)_virtualObserver.disconnect();
+    _virtualObserver=new IntersectionObserver(entries=>{
+      if(entries[0].isIntersecting){appendNextEventPage()}
+    },{root:el.closest('.events-wrap')||null});
+    _virtualObserver.observe(document.getElementById('events-sentinel'));
+  }
+}
+function renderEventSlice(start,end){
+  return _filteredEvents.slice(start,end).map(e=>{
     const rc=e.event_type==='after'&&(e.has_changes||e.ir_changed)?'changed':e.event_type==='invalidated'?'invalidated':'';
     const bc=e.event_type==='before'?'bef':e.event_type==='after'?'aft':'inv';
     const nest='&nbsp;'.repeat(e.depth*2);
@@ -1063,7 +1097,17 @@ function renderEvents(){
     }else if(e.event_type==='invalidated')d='<span class="nc">invalidated</span>';
     return `<div class="ev ${rc}" ${canView?`onclick="openDiff(${e.id})"`:''}><span class="eid">${e.id}</span><span><span class="badge ${bc}">${e.event_type.slice(0,3)}</span></span><span class="pname"><span class="t-${e.pass_type}">${nest}${esc(e.pass_name)}</span></span><span class="iru">${e.ir_kind} ${esc(e.ir_name)}</span><span class="dep">${e.depth}</span><span class="dlt" title="Per-metric changes for this pass (before → after); only metrics that moved are shown">${d}</span><span>${canView?`<button class="view-btn" title="View IR diff">⊕</button> <button class="ai-explain-btn" title="Ask AI about this change" onclick="explainEvent(event,${e.id})">✨</button>`:''}</span></div>`;
   }).join('');
-  document.getElementById('events').innerHTML=html||'<div style="padding:50px;text-align:center;color:var(--text-muted)">No events match filter</div>';
+}
+function appendNextEventPage(){
+  const el=document.getElementById('events');
+  const sentinel=document.getElementById('events-sentinel');
+  if(!sentinel)return;
+  const start=_virtualOffset+VIRTUAL_PAGE_SIZE;
+  if(start>=_filteredEvents.length){if(_virtualObserver)_virtualObserver.disconnect();sentinel.remove();return}
+  const end=Math.min(start+VIRTUAL_PAGE_SIZE,_filteredEvents.length);
+  sentinel.insertAdjacentHTML('beforebegin',renderEventSlice(start,end));
+  _virtualOffset=end;
+  if(end>=_filteredEvents.length){if(_virtualObserver)_virtualObserver.disconnect();sentinel.remove()}
 }
 
 // ===== PIPELINE STATS =====

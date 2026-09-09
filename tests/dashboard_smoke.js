@@ -35,7 +35,8 @@ function mkEl() {
         style: {}, dataset: {},
         classList: { add() {}, remove() {}, contains: () => false },
         addEventListener() {}, appendChild() {}, removeChild() {},
-        prepend() {},
+        prepend() {}, insertAdjacentHTML() {},
+        closest() { return null; },
         click() {}, focus() {}, scrollIntoView() {},
         getContext: () => mkCtx(),
         getBoundingClientRect: () => ({ width: 800, height: 200 }),
@@ -203,6 +204,34 @@ try {
     showIntegrityBanner(norm);
     check("integrity banner shown",
         (__els["integrity-banner"] || { innerHTML: "" }).innerHTML.includes("integrity notice"));
+
+    // 9. callback rate formula: passes_with_ir_changes / total_after
+    D.summary = JSON.parse(JSON.stringify(D.summary));
+    D.summary.total_before = s2.total_before;
+    D.summary.total_after = s2.total_after || 1;
+    D.summary.passes_with_changes = s2.passes_with_changes;
+    D.summary.passes_with_ir_changes = s2.passes_with_ir_changes;
+    renderOverview();
+    const rateVal = s2.total_after ? Math.round((s2.passes_with_ir_changes ?? s2.passes_with_changes) / s2.total_after * 100) : 0;
+    check("callback rate formula rendered",
+        __els["overview-cards"].innerHTML.includes(rateVal + "%"),
+        "expected " + rateVal + "% in overview");
+
+    // 10. function_summaries (whole-pipeline) data flows through
+    D.summary.function_summaries = {
+      "test_func": {
+        status: "retained",
+        initial_metrics: { instruction_count: 100, basic_block_count: 20 },
+        final_metrics: { instruction_count: 80, basic_block_count: 18 }
+      }
+    };
+    renderFunctions();
+    check("function_summaries rendered",
+        __els["func-grid"].innerHTML.includes("whole-pipeline"),
+        "expected 'whole-pipeline' label in function cards");
+    check("function_summaries shows correct delta",
+        __els["func-grid"].innerHTML.includes("-20"),
+        "expected delta -20 (80-100)");
 } catch (err) {
     __failures++;
     console.log("  [FAIL] driver threw: " + (err && err.stack));

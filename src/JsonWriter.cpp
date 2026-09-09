@@ -9,6 +9,7 @@
 #include <cassert>
 #include <cstdio>
 #include <fstream>
+#include <map>
 #include <set>
 
 using namespace llvm;
@@ -261,7 +262,50 @@ bool writeHistoryJSON(const std::string &filename, const CodegenResult &cg) {
             "pipeline was applied to all functions. Recompile without "
             "optnone (e.g. clang -O2) for optnone-aware comparison.");
     }
-    f << "\"\n";
+    f << "\",\n";
+    // Metric provenance: document where whole-module totals came from
+    f << "    \"metric_source\": {\n";
+    f << "      \"instructions\": \"" << (found_first && found_last ? "first_last_module_observation" : "unavailable") << "\",\n";
+    f << "      \"basic_blocks\": \"" << (found_first && found_last ? "first_last_module_observation" : "unavailable") << "\",\n";
+    f << "      \"codegen\": \"" << (cg.error_before.empty() && cg.error_after.empty() ? "target_specific_measurement" : "unavailable") << "\"\n";
+    f << "    },\n";
+    // Per-function whole-pipeline summaries: first and last observed metrics
+    // for each Function-scoped IR unit across all pass callbacks.
+    std::map<std::string, IRMetrics> func_first, func_last;
+    std::map<std::string, std::string> func_status;  // "retained" for now
+    for (auto &e : g_events) {
+        if (e.ir_kind != "Function") continue;
+        if (func_first.find(e.ir_name) == func_first.end())
+            func_first[e.ir_name] = e.metrics_before;
+        func_last[e.ir_name] = e.metrics_after;
+        func_status[e.ir_name] = "retained";
+    }
+    f << "    \"function_summaries\": {";
+    bool first_func = true;
+    for (auto &[name, last] : func_last) {
+        auto &first = func_first[name];
+        if (!first_func) f << ",";
+        first_func = false;
+        f << "\n      \"" << jsonEscape(name) << "\": {\n";
+        f << "        \"status\": \"" << func_status[name] << "\",\n";
+        f << "        \"initial_metrics\": {\"instruction_count\": " << first.instruction_count
+          << ", \"basic_block_count\": " << first.basic_block_count
+          << ", \"call_count\": " << first.call_count
+          << ", \"load_count\": " << first.load_count
+          << ", \"store_count\": " << first.store_count
+          << ", \"branch_count\": " << first.branch_count
+          << ", \"phi_count\": " << first.phi_count << "},\n";
+        f << "        \"final_metrics\": {\"instruction_count\": " << last.instruction_count
+          << ", \"basic_block_count\": " << last.basic_block_count
+          << ", \"call_count\": " << last.call_count
+          << ", \"load_count\": " << last.load_count
+          << ", \"store_count\": " << last.store_count
+          << ", \"branch_count\": " << last.branch_count
+          << ", \"phi_count\": " << last.phi_count << "}\n";
+        f << "      }";
+    }
+    if (!func_last.empty()) f << "\n    ";
+    f << "}\n";
     f << "  }\n";
     f << "}\n";
 
