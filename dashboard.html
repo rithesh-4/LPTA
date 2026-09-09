@@ -652,25 +652,34 @@ function render(){
 // ===== OVERVIEW =====
 function renderOverview(){
   if(!D)return;const s=D.summary;
-  const iRed=s.total_instructions_before-s.total_instructions_after;
-  const iPct=s.total_instructions_before?Math.round(iRed/s.total_instructions_before*100):0;
-  const cgRed=s.codegen_asm_lines_before-s.codegen_asm_lines_after;
-  const cgPct=s.codegen_asm_lines_before?Math.round(cgRed/s.codegen_asm_lines_before*100):0;
+  const iRed=(s.total_instructions_before||0)-(s.total_instructions_after||0);
+  const iPct=s.total_instructions_before?Math.round(iRed/s.total_instructions_before*100):null;
+  const cgRed=(s.codegen_asm_lines_before||0)-(s.codegen_asm_lines_after||0);
+  const cgPct=s.codegen_asm_lines_before?Math.round(cgRed/s.codegen_asm_lines_before*100):null;
   const changedPasses=changedCount(s),totalAfter=s.total_after;
   const efficiency=totalAfter?Math.round(changedPasses/totalAfter*100):0;
+  const totalIrChanged=(s.passes_with_ir_changes||changedPasses);
+  const rate=totalAfter&&totalIrChanged!=null?Math.round(totalIrChanged/totalAfter*100):null;
 
+  const cardVal=(v,fmt)=>{
+    if(v==null||Number.isNaN(v))return'N/A';
+    if(fmt==='pct')return Math.abs(v)+'%';
+    if(fmt==='signed')return(v>0?'+':'')+v;
+    return Number(v).toLocaleString();
+  };
   const cards=[
-    {icon:'📊',iconCls:'blue',value:s.total_before,label:'Pass Executions',sub:'BEFORE callbacks',fmt:'num'},
-    {icon:'✅',iconCls:'green',value:changedPasses,label:'Passes Changed IR',sub:`out of ${totalAfter}`,fmt:'num'},
-    {icon:'🎯',iconCls:'purple',value:efficiency,label:'Pipeline Efficiency',sub:`${changedPasses}/${totalAfter} passes effective`,fmt:'pct'},
-    {icon:'⚡',iconCls:'green',value:iPct,label:'IR Reduction',sub:`${s.total_instructions_before} → ${s.total_instructions_after}`,fmt:'pct'},
-    {icon:'📦',iconCls:'yellow',value:cgPct,label:'Codegen Reduction',sub:`${s.codegen_asm_lines_before} → ${s.codegen_asm_lines_after} lines`,fmt:'pct'},
-    {icon:'⚠️',iconCls:'red',value:s.total_invalidated,label:'Invalidated',sub:'analysis discarded',fmt:'num'},
+    {icon:'📊',iconCls:'blue',value:totalAfter,label:'Completed callbacks',sub:'after-events (all pass types)',fmt:'num'},
+    {icon:'✅',iconCls:'green',value:changedPasses,label:'Structural-change callbacks',sub:'a metric counter moved',fmt:'num'},
+    {icon:'🧬',iconCls:'purple',value:totalIrChanged,label:'Any-IR-change callbacks',sub:'counters or IR text changed',fmt:'num'},
+    {icon:'🎯',iconCls:'purple',value:rate,label:'IR-changing callback rate',sub:rate!=null?`${totalIrChanged}/${totalAfter} changed`:'share of completed callbacks',fmt:'pct'},
+    {icon:'⚡',iconCls:'green',value:iPct,label:'Whole-module instruction change',sub:s.total_instructions_before!=null&&s.total_instructions_after!=null?`${s.total_instructions_before} → ${s.total_instructions_after} (${-iRed>0?'+':''}${-iRed})`:'initial/final totals unavailable',fmt:'pct'},
+    {icon:'📦',iconCls:'yellow',value:cgPct,label:'Assembly line-count change',sub:cgPct!=null?`${s.codegen_asm_lines_before} → ${s.codegen_asm_lines_after} lines (size proxy, not runtime)`:'codegen unavailable or failed',fmt:'pct'},
+    {icon:'⚠️',iconCls:'red',value:s.total_invalidated,label:'No-after-state callbacks',sub:'pass deleted its own IR unit',fmt:'num'},
   ];
   document.getElementById('overview-cards').innerHTML=cards.map((c,i)=>`
     <div class="stat-card reveal stagger-${i+1}">
       <div class="stat-icon ${c.iconCls}">${c.icon}</div>
-      <div class="stat-value" data-format="${c.fmt}" data-target="${c.value}">0</div>
+      <div class="stat-value" data-format="${c.fmt}" data-target="${c.value==null?'':c.value}">${cardVal(c.value,c.fmt)}</div>
       <div class="stat-label">${c.label}</div>
       <div class="stat-sub">${c.sub}</div>
     </div>`).join('');
@@ -686,6 +695,45 @@ function renderOverview(){
   </p>`;
   renderTopPassesCompact();
   renderCrossTarget();
+}
+
+// ===== NORMALIZE / INTEGRITY =====
+function normalizeHistory(d){
+  if(!d||!d.summary)return{mismatch:false,calculated:{}};
+  const s=d.summary;
+  const evts=d.events||[];
+  let totalBefore=0,totalAfter=0,changed=0,irChanged=0,invalidated=0;
+  let instrBefore=0,instrAfter=0,bbBefore=0,bbAfter=0;
+  for(const e of evts){
+    if(e.event_type==='before'){
+      totalBefore++;
+      if(e.metrics_before){instrBefore+=e.metrics_before.instruction_count||0;bbBefore+=e.metrics_before.basic_block_count||0;}
+    }else if(e.event_type==='after'){
+      totalAfter++;
+      if(e.ir_changed)irChanged++;
+      if(e.has_changes)changed++;
+      if(e.metrics_after){instrAfter+=e.metrics_after.instruction_count||0;bbAfter+=e.metrics_after.basic_block_count||0;}
+    }else if(e.event_type==='invalidated'){invalidated++;}
+  }
+  const calc={total_before:totalBefore,total_after:totalAfter,passes_with_changes:changed,
+    total_instructions_before:instrBefore,total_instructions_after:instrAfter,
+    total_basic_blocks_before:bbBefore,total_basic_blocks_after:bbAfter,
+    total_invalidated:invalidated};
+  let mismatch=false;
+  for(const k of Object.keys(calc)){
+    if(s[k]!==undefined&&s[k]!==calc[k])mismatch=true;
+  }
+  return{mismatch,calculated:calc};
+}
+function showIntegrityBanner(norm){
+  if(!norm||!norm.mismatch)return;
+  let el=document.getElementById('integrity-banner');
+  if(!el){
+    el=document.createElement('div');el.id='integrity-banner';
+    const ov=document.getElementById('overview-cards');
+    if(ov&&ov.parentNode)ov.parentNode.insertBefore(el,ov);
+  }
+  el.innerHTML='<div style="background:var(--red-soft);border:1px solid rgba(248,113,113,.3);border-radius:10px;padding:12px 18px;margin-bottom:16px;font-size:12px;color:var(--red)"><strong>⚠ integrity notice:</strong> Summary totals do not match event counts. The report may have been edited or generated with an older version.</div>';
 }
 
 function renderTopPassesCompact(){
@@ -1195,6 +1243,32 @@ function metricChips(e){
     const delta=d?` <span class="md ${d<0?'neg':'pos'}" title="Change made by this pass">(${d>0?'+':''}${d})</span>`:'';
     return `<div class="m" title="${info[1]}"><span class="ml">${info[0]}:</span><span class="mv">${b} → ${a}</span>${delta}</div>`;
   }).join('');
+}
+// ===== ORDERED DIFF =====
+function orderedDiff(a,b){
+  const n=a.length,m=b.length;
+  const dp=Array.from({length:n+1},()=>new Uint16Array(m+1));
+  for(let i=1;i<=n;i++)for(let j=1;j<=m;j++){
+    if(a[i-1]===b[j-1])dp[i][j]=dp[i-1][j-1]+1;
+    else dp[i][j]=Math.max(dp[i-1][j],dp[i][j-1]);
+  }
+  const lcs=[];
+  {let i=n,j=m;while(i>0&&j>0){
+    if(a[i-1]===b[j-1]){lcs.unshift({ai:i-1,bj:j-1});i--;j--;}
+    else if(dp[i-1][j]>=dp[i][j])i--;else j--;
+  }}
+  const rows=[];
+  {let ai=0,bj=0;
+  for(const p of lcs){
+    while(ai<p.ai&&bj<p.bj){rows.push({t:' ',a:ai,b:bj});ai++;bj++;}
+    if(ai<p.ai){rows.push({t:'-',a:ai});ai++;}
+    if(bj<p.bj){rows.push({t:'+',b:bj});bj++;}
+    rows.push({t:' ',a:p.ai,b:p.bj});ai++;bj++;
+  }
+  while(ai<n){rows.push({t:'-',a:ai});ai++;}
+  while(bj<m){rows.push({t:'+',b:bj});bj++;}
+  }
+  return{rows,fallback:dp[n][m]<Math.max(n,m)*0.4};
 }
 // Raw IR of the currently open diff, for the copy buttons.
 let CURRENT_DIFF_BEFORE='',CURRENT_DIFF_AFTER='';
@@ -1818,12 +1892,29 @@ function renderCompareResults(cmp){
   const sb=cmp.summary;
   const bm=cmp.base_meta;
   const cm=cmp.curr_meta;
-  const score=cmp.regression_score||0;
+  const rawScore=cmp.regression_score;
+  const score=rawScore||0;
   const regressions=cmp.regressions||[];
   const improvements=cmp.improvements||[];
   const highReg=regressions.filter(r=>r.severity==='high').length;
   const medReg=regressions.filter(r=>r.severity==='medium').length;
   const posImp=improvements.filter(i=>i.severity==='positive').length;
+
+  // Handle incomparable
+  if(rawScore===null&&(cmp.verdict==='incomparable'||(cmp.compat&&cmp.compat.blocked))){
+    let html='<div class="compare-section reveal">';
+    html+='<div class="compare-section-header"><h3>⚠ Incomparable</h3></div>';
+    html+='<div class="compare-section-body"><div style="padding:16px;color:var(--text-secondary)">';
+    html+='<strong>These two reports cannot be compared.</strong><br><br>';
+    if(cmp.compat&&cmp.compat.blocked)html+=esc(cmp.compat.blocked)+'<br>';
+    if(cmp.compat&&cmp.compat.warnings&&cmp.compat.warnings.length){
+      html+='<br><span style="color:var(--text-muted);font-size:11px">Warnings: '+cmp.compat.warnings.map(w=>esc(w)).join('; ')+'</span>';
+    }
+    html+='</div></div></div>';
+    results.innerHTML=html;
+    triggerReveals();
+    return;
+  }
 
   const scoreColor=score>60?'var(--red)':score>30?'var(--yellow)':'var(--green)';
   const scoreLabel=score>60?'Regressed':score>30?'Mixed':'Improved';
@@ -1841,7 +1932,7 @@ function renderCompareResults(cmp){
   html+='<div class="score-value" style="color:'+scoreColor+'">'+score+'</div>';
   html+='</div>';
   html+='<div class="compare-score-details">';
-  html+='<h4><span class="score-verdict '+scoreClass+'">'+scoreLabel+'</span> — Heuristic indicator: '+score+'/100</h4>';
+  html+='<h4><span class="score-verdict '+scoreClass+'">'+scoreLabel+'</span> — Regression risk score: '+score+'/100</h4>';
   html+='<div class="score-desc">';
   if(score<=10) html+='The current run shows consistent improvements across instructions, codegen, and pass behavior.';
   else if(score<=30) html+='The current run shows mostly improvements with minor variations.';
