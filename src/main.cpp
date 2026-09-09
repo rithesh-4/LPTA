@@ -1504,22 +1504,39 @@ int main(int argc, char **argv) {
     errs() << "Output: " << g_output_dir << "\n";
     errs() << "=================================\n\n";
 
-    // Save initial IR before optimization
+    // Save initial IR before optimization (secondary artifact: warn, don't
+    // fail — history.json remains the fatal artifact, checked at the end).
     std::string ir_before_path = g_output_dir + "/ir_before_opt.ll";
     {
         std::error_code EC;
         raw_fd_ostream file(ir_before_path, EC);
-        if (!EC) M->print(file, nullptr);
+        if (EC) {
+            errs() << "  WARNING: could not write '" << ir_before_path
+                   << "': " << EC.message() << "\n";
+        } else {
+            M->print(file, nullptr);
+            file.flush();
+            if (file.has_error())
+                errs() << "  WARNING: I/O failure writing '" << ir_before_path << "'\n";
+        }
     }
 
     MPM.run(*M, MAM);
 
-    // Save final IR after optimization
+    // Save final IR after optimization (same warning-only policy).
     std::string ir_after_path = g_output_dir + "/ir_after_opt.ll";
     {
         std::error_code EC;
         raw_fd_ostream file(ir_after_path, EC);
-        if (!EC) M->print(file, nullptr);
+        if (EC) {
+            errs() << "  WARNING: could not write '" << ir_after_path
+                   << "': " << EC.message() << "\n";
+        } else {
+            M->print(file, nullptr);
+            file.flush();
+            if (file.has_error())
+                errs() << "  WARNING: I/O failure writing '" << ir_after_path << "'\n";
+        }
     }
 
     // Measure codegen impact

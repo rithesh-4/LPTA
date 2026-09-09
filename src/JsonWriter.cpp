@@ -233,12 +233,16 @@ bool writeHistoryJSON(const std::string &filename, const CodegenResult &cg) {
         f << "\"" << jsonEscape(g_optnone_functions[i]) << "\"";
     }
     f << "],\n";
+    // The pipeline always strips optnone and optimizes everything (see
+    // main.cpp): "stripped" is the truthful state, not "not optimized".
+    f << "    \"optnone_stripped\": " << (g_optnone_detected ? "true" : "false") << ",\n";
     f << "    \"optnone_warning\": \"";
     if (g_optnone_detected) {
         f << jsonEscape(
             std::to_string(g_optnone_functions.size()) +
-            " function(s) with optnone were not optimized. "
-            "Recompile with -O2 to see optimization effects.");
+            " function(s) had optnone stripped before the run; the full "
+            "pipeline was applied to all functions. Recompile without "
+            "optnone (e.g. clang -O2) for optnone-aware comparison.");
     }
     f << "\"\n";
     f << "  }\n";

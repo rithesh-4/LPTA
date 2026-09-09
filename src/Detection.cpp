@@ -80,10 +80,11 @@ std::string serializeIR(const Any &IR) {
     return buf;
 }
 
-// FNV-1a 64-bit over the canonical serialization. hashIRUnit(a) ==
-// hashIRUnit(b) iff the printed IR text is byte-identical, so any textual
-// IR mutation (operands, constants, attributes, ordering) flips the hash
-// even when all structural metric counters are unchanged.
+// FNV-1a 64-bit over the canonical serialization. In practice equal hashes
+// mean byte-identical IR text, so any textual IR mutation (operands,
+// constants, attributes, ordering) flips the hash even when all structural
+// metric counters are unchanged. (Probabilistic: a 64-bit hash can collide
+// in theory; the chance per comparison is ~2^-64.)
 uint64_t hashIRUnit(const Any &IR) {
     return hashIRText(serializeIR(IR));
 }

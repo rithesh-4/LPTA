@@ -32,11 +32,22 @@ Generates structured JSON + interactive HTML dashboard
 
 ### Prerequisites
 
-- LLVM 17+ (tested with 22.1.8) installed — bundled: `clang+llvm-22.1.8-x86_64-pc-windows-msvc/` in repo
+- LLVM 22.1.8 with `clang-cl` (other LLVM 17+ installs may work but are untested —
+  LLVM's C++ pass APIs are version-sensitive, so mismatches can fail the build)
 - CMake 3.20+
-- Ninja (recommended) or Make
+- Ninja (required by `run_lpta.sh`; direct CMake builds may use other generators)
 - A C++17 compiler (Clang recommended)
 - Windows: Git Bash / MSYS2 (for `bash run_lpta.sh`, tests)
+
+> **Where LLVM comes from:** this workspace ships a prebuilt
+> `clang+llvm-22.1.8-x86_64-pc-windows-msvc/` toolchain that `run_lpta.sh` and
+> the test scripts auto-detect. It is **not tracked in git** (too large —
+> see `.gitignore`), so a fresh clone needs either that directory restored
+> next to the repo or `LLVM_DIR` pointed at a compatible install:
+> ```bash
+> export LLVM_DIR=C:/path/to/llvm   # must contain lib/cmake/llvm
+> bash run_lpta.sh input.ll
+> ```
 
 > **Input:** LLVM IR (`.ll`) is analyzed directly; C/C++ (`.c`/`.cpp`/...) passed to
 > `run_lpta.sh` is first compiled to IR with clang (see `CLANG` / `LPTA_CFLAGS`
@@ -497,9 +508,9 @@ If `opt` is available, the validation script compares LPTA's final metrics again
 
 Running LPTA twice on the same input produces byte-identical `history.json` output — including across different output directories (run-specific absolute paths embedded by `llc` are normalized to filenames before measuring).
 
-### 5. Formal Invariants
+### 5. Runtime Invariants
 
-The C++ source code contains `assert()` statements that verify counting invariants at runtime (e.g., `instruction_count >= call_count + load_count + store_count`).
+The C++ source code contains `assert()` statements that verify counting invariants at runtime (e.g., `instruction_count >= call_count + load_count + store_count`, opcode groups partitioning `instruction_count`).
 
 ### 6. Unit Tests
 

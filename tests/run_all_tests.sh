@@ -133,6 +133,17 @@ fi
 "$EXE" real_test.ll "$TMP_DIR/t_real" -O2 >/dev/null 2>&1
 [ $? -eq 0 ] && pass "real_test.ll -O2 -> RC=0" || fail "real_test.ll -O2 -> RC=$?"
 
+# Test: optnone input reports stripping truthfully (not "not optimized")
+"$EXE" tests/test_optnone.ll "$TMP_DIR/t_optnone" -O2 >/dev/null 2>&1
+[ $? -eq 0 ] && pass "optnone input -> RC=0" || fail "optnone input -> RC=$?"
+if grep -q '"optnone_stripped": true' "$TMP_DIR/t_optnone/history.json" 2>/dev/null \
+   && grep -q 'had optnone stripped' "$TMP_DIR/t_optnone/history.json" 2>/dev/null \
+   && ! grep -q 'were not optimized' "$TMP_DIR/t_optnone/history.json" 2>/dev/null; then
+    pass "optnone history states stripped (not 'not optimized')"
+else
+    fail "optnone history message incorrect"
+fi
+
 # Test: stack balance
 OUT=$("$EXE" test.ll "$TMP_DIR/t_stack" -O2 2>&1)
 echo "$OUT" | grep -q "Stack remaining: 0" && pass "Stack balanced (FIX #7 verified)" || fail "Stack not balanced"
