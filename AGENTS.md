@@ -1,6 +1,6 @@
 # LPTA — LLVM Pass Transformation Analysis
 
-Instrumentation tool (**not** upstream LLVM source): runs the `opt` pipeline on a `.ll` file via PassInstrumentationCallbacks, records IR metrics before/after every pass, emits `history.json` for `dashboard.html`. Input must be LLVM IR (`.ll`), not C. **Windows-only**: `clang-cl` + Ninja + `.exe`; tests require Git Bash/MSYS (`dd`, `timeout`, `sed`).
+Instrumentation tool (**not** upstream LLVM source): runs the `opt` pipeline on a `.ll` file via PassInstrumentationCallbacks, records IR metrics before/after every pass, emits `history.json` for `dashboard.html`. `lpta_test` takes LLVM IR (`.ll`) only; `run_lpta.sh` also accepts C/C++ (compiles to `build/lpta_input_<name>.ll` via `$CLANG` + `$LPTA_CFLAGS`, default `-O0`). **Windows-only**: `clang-cl` + Ninja + `.exe`; tests require Git Bash/MSYS (`dd`, `timeout`, `sed`).
 
 ## Layout (non-obvious wiring)
 

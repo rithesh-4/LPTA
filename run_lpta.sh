@@ -1,19 +1,25 @@
 #!/bin/bash
 # LPTA - Build and Run Script
-# Usage: bash run_lpta.sh [input.ll] [report_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=...] [--]
+# Usage: bash run_lpta.sh [input.ll|input.c] [report_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=...] [--]
 #
 # Environment variables:
-#   LLVM_DIR   - Path to LLVM installation (REQUIRED if not auto-detectable)
-#   BUILD_DIR  - Build directory (default: ./build)
-#   REPORT_DIR - Output directory (default: ./report)
+#   LLVM_DIR    - Path to LLVM installation (REQUIRED if not auto-detectable)
+#   BUILD_DIR   - Build directory (default: ./build)
+#   REPORT_DIR  - Output directory (default: ./report)
+#   CLANG       - C/C++ compiler for .c inputs (default: bundled clang, else PATH)
+#   LPTA_CFLAGS - Extra flags for the .c -> IR step (default: -O0).
+#                 E.g. target/headers for bare-metal code:
+#                 LPTA_CFLAGS="--target=arm-none-eabi -mcpu=cortex-m4 -I PATH -DSTM32F407xx"
 
 set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: bash run_lpta.sh [input.ll] [report_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=...] [--]
+Usage: bash run_lpta.sh [input.ll|input.c] [report_dir] [-O0|-O1|-O2|-O3|-Os|-Oz] [--snapshots] [--targets=...] [--]
 
-  input.ll        LLVM IR file to analyze (default: ./test.ll)
+  input.ll/c      LLVM IR (.ll) analyzed directly; C/C++ (.c/.cpp/...) is
+                  first compiled to IR with clang (see CLANG, LPTA_CFLAGS).
+                  Default input: ./test.ll
   report_dir      Output directory (default: ./report or $REPORT_DIR)
   -O0..-Oz        Optimization level (default: -O2, last one wins)
   --snapshots     Save per-pass IR snapshots
@@ -145,6 +151,47 @@ if [ ! -f "$SCRIPT_DIR/dashboard.html" ]; then
     echo "ERROR: dashboard.html not found next to run_lpta.sh: '$SCRIPT_DIR/dashboard.html'" >&2
     exit 1
 fi
+
+# C/C++ passthrough: compile to LLVM IR first, then analyze the IR.
+# Keeps INPUT as the user's file for messages; GEN_LL is what LPTA runs on.
+GEN_LL=""
+case "$INPUT" in
+    *.c|*.C|*.cpp|*.cc|*.cxx|*.c++|*.C++)
+        # Locate clang: $CLANG wins, then the bundled compiler, then PATH.
+        CLANG="${CLANG:-}"
+        if [ -z "$CLANG" ]; then
+            # Unmatched globs stay literal and fail the -x test, so this
+            # is safe even with zero or many bundled toolchains.
+            for cand in "$SCRIPT_DIR"/clang+llvm-*/bin/clang.exe \
+                        "$SCRIPT_DIR"/clang+llvm-*/bin/clang; do
+                if [ -x "$cand" ]; then CLANG="$cand"; break; fi
+            done
+        fi
+        if [ -z "$CLANG" ] && command -v clang >/dev/null 2>&1; then
+            CLANG="clang"
+        fi
+        if [ -z "$CLANG" ]; then
+            echo "ERROR: C/C++ input needs clang, but none was found." >&2
+            echo "  Set CLANG=/path/to/clang or place a bundled clang+llvm-*/ next to run_lpta.sh." >&2
+            exit 1
+        fi
+        SRC_BASE="$(basename "$INPUT")"
+        SRC_BASE="${SRC_BASE%.*}"
+        # Sanitize to a safe stem (spaces etc. would leak into history.json names)
+        SRC_BASE="$(printf '%s' "$SRC_BASE" | tr -c 'A-Za-z0-9_.-' '_')"
+        GEN_LL="$BUILD_DIR/lpta_input_${SRC_BASE}.ll"
+        mkdir -p "$BUILD_DIR"
+        echo "  Compiling $INPUT -> $GEN_LL"
+        echo "    clang flags: ${LPTA_CFLAGS:--O0 (default; override with LPTA_CFLAGS)}"
+        # shellcheck disable=SC2086: LPTA_CFLAGS is intentionally word-split
+        if ! "$CLANG" -S -emit-llvm ${LPTA_CFLAGS:--O0} "$INPUT" -o "$GEN_LL" 2>"$BUILD_DIR/clang.log"; then
+            echo "ERROR: clang failed on '$INPUT'. Last 30 lines of $BUILD_DIR/clang.log:" >&2
+            tail -30 "$BUILD_DIR/clang.log" >&2 || true
+            exit 1
+        fi
+        INPUT="$GEN_LL"
+        ;;
+esac
 for tool in cmake ninja; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "ERROR: required tool '$tool' not found on PATH." >&2

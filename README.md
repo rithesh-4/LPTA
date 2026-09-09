@@ -38,19 +38,23 @@ Generates structured JSON + interactive HTML dashboard
 - A C++17 compiler (Clang recommended)
 - Windows: Git Bash / MSYS2 (for `bash run_lpta.sh`, tests)
 
-> **Input must be LLVM IR (`.ll`), not C.** Compile C first if needed:
+> **Input:** LLVM IR (`.ll`) is analyzed directly; C/C++ (`.c`/`.cpp`/...) passed to
+> `run_lpta.sh` is first compiled to IR with clang (see `CLANG` / `LPTA_CFLAGS`
+> below). The `lpta_test` binary itself takes only `.ll` — compile C first:
 > ```bash
 > clang -O2 -S -emit-llvm real_test.c -o input.ll   # or use bundled clang
 > # bundled: clang+llvm-22.1.8-x86_64-pc-windows-msvc/bin/clang.exe
 > # real_test.ll is already compiled from real_test.c in this repo
+> # ...or let run_lpta.sh do it:  bash run_lpta.sh real_test.c --snapshots
 > ```
 > **Windows-only:** uses `clang-cl` + Ninja + `.exe` (see `CMakeLists.txt`). Tests require Git Bash/MSYS (`dd`, `timeout`, `sed`).
 
 ### 1. One-Command Build & Run (Recommended)
 
 ```bash
-# From repo root
+# From repo root (.ll analyzed directly, .c compiled via clang first)
 bash run_lpta.sh input.ll [--snapshots]
+bash run_lpta.sh prog.c -Os --snapshots
 ```
 
 **Environment variables (optional):**
@@ -58,13 +62,17 @@ bash run_lpta.sh input.ll [--snapshots]
 export LLVM_DIR=/path/to/llvm          # if not auto-detected (bundled auto-found via llvm-config)
 export BUILD_DIR=./build               # default
 export REPORT_DIR=./report             # default
+export CLANG=/path/to/clang            # C/C++ compiler (default: bundled clang, else PATH)
+export LPTA_CFLAGS="--target=arm-none-eabi -mcpu=cortex-m4 -IDrivers -DSTM32F407xx"
+                                       # flags for the .c -> IR step (default: -O0)
 ```
 
 **What it does:**
 1. Configures CMake with bundled LLVM (or your `LLVM_DIR`)
 2. Builds `lpta_test.exe` via Ninja
-3. Runs LPTA on `input.ll` → `./report/`
-4. Copies `dashboard.html` → `./report/index.html`
+3. `.c`/`.cpp` input? Compiles it to IR (`build/lpta_input_<name>.ll`) via clang
+4. Runs LPTA on the IR → `./report/`
+5. Copies `dashboard.html` → `./report/index.html`
 
 > **Note:** `build/` is pre-configured (Ninja + clang-cl, `LLVM_DIR` → bundled distro) — just `ninja` inside `build/` if you already built once. Fresh configure only needed after `rm -rf build/`.
 
