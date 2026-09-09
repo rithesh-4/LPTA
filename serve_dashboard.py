@@ -454,8 +454,10 @@ class LPTAHandler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_OPTIONS(self):
+        # No Access-Control-Allow-Origin: the dashboard is same-origin, and
+        # wildcard CORS would let any site drive the AI proxy with the
+        # operator's credential.
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Content-Length", "0")
@@ -502,12 +504,36 @@ class LPTAHandler(SimpleHTTPRequestHandler):
         messages = payload.get("messages")
         if not isinstance(messages, list) or not messages:
             return self._send_json(400, {"error": "body must contain 'messages': [...]"})
+        # Bounds: this proxy forwards to a billed/rate-limited upstream API
+        # with the server operator's credential — cap what one request can do.
+        if len(messages) > 100:
+            return self._send_json(400, {"error": "at most 100 messages per request"})
+        for msg in messages:
+            if not isinstance(msg, dict) or not isinstance(msg.get("role"), str) \
+                    or not isinstance(msg.get("content"), str):
+                return self._send_json(400, {"error": "each message needs string 'role' and 'content'"})
+            if len(msg["content"]) > 50000:
+                return self._send_json(400, {"error": "single message over 50000 chars"})
+        try:
+            max_tokens = int(payload.get("max_tokens", 2048))
+        except (TypeError, ValueError):
+            return self._send_json(400, {"error": "max_tokens must be an integer"})
+        if not 1 <= max_tokens <= 4096:
+            return self._send_json(400, {"error": "max_tokens must be 1..4096"})
+        try:
+            temperature = float(payload.get("temperature", 0.4))
+        except (TypeError, ValueError):
+            return self._send_json(400, {"error": "temperature must be a number"})
+        if not 0.0 <= temperature <= 2.0:
+            return self._send_json(400, {"error": "temperature must be 0..2"})
 
         upstream_body = json.dumps({
-            "model": payload.get("model") or self.ai_model,
+            # Model is server-configured only: callers must not redirect the
+            # operator's credential to an arbitrary model/endpoint.
+            "model": self.ai_model,
             "messages": messages,
-            "temperature": payload.get("temperature", 0.4),
-            "max_tokens": payload.get("max_tokens", 2048),
+            "temperature": temperature,
+            "max_tokens": max_tokens,
             "stream": False,
         }).encode("utf-8")
 
@@ -560,7 +586,6 @@ class LPTAHandler(SimpleHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Cache-Control", "no-store")
@@ -614,7 +639,15 @@ def serve():
     ap.add_argument("directory", nargs="?", default="report", help="report dir to serve (default: report)")
     ap.add_argument("-p", "--port", type=int, default=8080)
     ap.add_argument("--host", default="127.0.0.1", help="bind address (default: 127.0.0.1)")
+    ap.add_argument("--allow-remote", action="store_true",
+                    help="permit binding a non-loopback address. Reports contain "
+                         "source IR and the server spends your AI credential: "
+                         "only use on networks you trust.")
     args = ap.parse_args()
+
+    if args.host not in ("127.0.0.1", "localhost", "::1") and not args.allow_remote:
+        sys.exit(f"error: refusing to bind non-loopback address '{args.host}' "
+                 f"without --allow-remote (reports expose source IR; see --help)")
 
     if not os.path.isdir(args.directory):
         sys.exit(f"error: directory '{args.directory}' does not exist "
@@ -633,6 +666,9 @@ def serve():
 
     server = ThreadingHTTPServer((args.host, args.port), LPTAHandler)
     print(f"  Serving '{LPTAHandler.directory}' at http://{args.host}:{args.port}")
+    if args.allow_remote:
+        print("  WARNING: --allow-remote: reachable clients can read reports "
+              "and spend your AI credential. Trust this network.")
     if LPTAHandler.ai_key:
         print(f"  AI Insights: ON  (model: {LPTAHandler.ai_model})")
     else:

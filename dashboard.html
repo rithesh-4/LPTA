@@ -1203,12 +1203,8 @@ function copyDiffBtn(btn,side){
   const done=()=>{const o=btn.textContent;btn.textContent='Copied ✓';setTimeout(()=>btn.textContent=o,1200)};
   const fallback=()=>{const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');done()}catch(e){}document.body.removeChild(ta)};
   if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(done).catch(()=>fallback());
-  else fallback();
+    else fallback();
 }
-// Passes-with-IR-changes, with fallback for histories written before
-// passes_with_ir_changes existed (then it equals the metric count).
-function changedCount(s){return (s.passes_with_ir_changes==null)?s.passes_with_changes:s.passes_with_ir_changes}
-
 // ===== FILTERS =====
 document.querySelectorAll('.filter-btn').forEach(b=>{b.addEventListener('click',()=>{document.querySelectorAll('.filter-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');F=b.dataset.filter;renderEvents()})});
 document.getElementById('search').addEventListener('input',renderEvents);
