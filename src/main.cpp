@@ -173,6 +173,7 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
         bool inTargets = false, inTargetObj = false;
         CompareEvent ev;
         CompareTarget tev;
+        bool sawEventsClose = false;
         while (std::getline(baseFile, line)) {
             if (!inEvents) {
                 // Top-level fields
@@ -235,9 +236,22 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                     auto bp = line.find('[', line.find("\"events\""));
                     if (bp != std::string::npos) {
                         // Empty array on one line ("events": []) — no events
-                        // to parse; stay out of events mode.
+                        // to parse; stay out of events mode. A non-empty
+                        // single-line array means minified JSON, which the
+                        // line parser cannot read soundly: fail loudly
+                        // instead of comparing partial data.
                         std::string rest = trimWS(line.substr(bp + 1));
-                        if (rest.empty() || rest[0] != ']') inEvents = true;
+                        if (rest.empty()) {
+                            inEvents = true;  // pretty-printed: entries follow
+                        } else if (rest[0] == ']') {
+                            /* empty array ("events": []) — nothing to parse */
+                        } else if (rest.find(']') != std::string::npos) {
+                            errs() << "ERROR: minified single-line events array is not supported; "
+                                   << "use pretty-printed history.json as written by lpta_test\n";
+                            return 1;
+                        } else {
+                            inEvents = true;
+                        }
                     }
                 }
             } else {
@@ -321,9 +335,20 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                             ev = CompareEvent();
                         }
                         inEvents = false;
+                        sawEventsClose = true;
                     }
                 }
             }
+        }
+        if (inEvents) {
+            errs() << "ERROR: '" << basePath << "' ends inside the events array "
+                   << "(truncated file?); refusing to compare partial data\n";
+            return 1;
+        }
+        if (!sawEventsClose) {
+            errs() << "ERROR: '" << basePath << "' has no events array; "
+                   << "not a usable comparison input\n";
+            return 1;
         }
     }
 
@@ -345,6 +370,7 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
         bool inEvents = false;
         bool inMetricsBefore = false, inMetricsAfter = false;
         bool inTargets = false, inTargetObj = false;
+        bool sawEventsClose = false;
         CompareEvent ev;
         CompareTarget tev;
         while (std::getline(currFile, line)) {
@@ -403,9 +429,22 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                     auto bp = line.find('[', line.find("\"events\""));
                     if (bp != std::string::npos) {
                         // Empty array on one line ("events": []) — no events
-                        // to parse; stay out of events mode.
+                        // to parse; stay out of events mode. A non-empty
+                        // single-line array means minified JSON, which the
+                        // line parser cannot read soundly: fail loudly
+                        // instead of comparing partial data.
                         std::string rest = trimWS(line.substr(bp + 1));
-                        if (rest.empty() || rest[0] != ']') inEvents = true;
+                        if (rest.empty()) {
+                            inEvents = true;  // pretty-printed: entries follow
+                        } else if (rest[0] == ']') {
+                            /* empty array ("events": []) — nothing to parse */
+                        } else if (rest.find(']') != std::string::npos) {
+                            errs() << "ERROR: minified single-line events array is not supported; "
+                                   << "use pretty-printed history.json as written by lpta_test\n";
+                            return 1;
+                        } else {
+                            inEvents = true;
+                        }
                     }
                 }
             } else {
@@ -478,9 +517,20 @@ static int compareJsonFiles(const std::string &basePath, const std::string &curr
                             ev = CompareEvent();
                         }
                         inEvents = false;
+                        sawEventsClose = true;
                     }
                 }
             }
+        }
+        if (inEvents) {
+            errs() << "ERROR: '" << currPath << "' ends inside the events array "
+                   << "(truncated file?); refusing to compare partial data\n";
+            return 1;
+        }
+        if (!sawEventsClose) {
+            errs() << "ERROR: '" << currPath << "' has no events array; "
+                   << "not a usable comparison input\n";
+            return 1;
         }
     }
 

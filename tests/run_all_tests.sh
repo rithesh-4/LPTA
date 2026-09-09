@@ -392,6 +392,25 @@ else
     fail "--compare summary lost with empty events array"
 fi
 rm -f "$COMPARE_TBASE" "$COMPARE_TCURR"
+
+# Test: --compare rejects malformed inputs loudly (no silent partial results)
+if command -v python3 &>/dev/null && [ -f "$TMP_DIR/t_json/history.json" ]; then
+    python3 -c "import json; json.dump(json.load(open('$TMP_DIR/t_json/history.json')), open('$TMP_DIR/cmp_mini.json','w'))"
+    if "$EXE" --compare "$TMP_DIR/cmp_mini.json" "$TMP_DIR/t_json/history.json" >/dev/null 2>&1; then
+        fail "--compare accepted minified JSON (should refuse)"
+    else
+        pass "--compare refuses minified JSON"
+    fi
+    head -20 "$TMP_DIR/t_json/history.json" > "$TMP_DIR/cmp_trunc.json"
+    if "$EXE" --compare "$TMP_DIR/cmp_trunc.json" "$TMP_DIR/t_json/history.json" >/dev/null 2>&1; then
+        fail "--compare accepted truncated JSON (should refuse)"
+    else
+        pass "--compare refuses truncated JSON"
+    fi
+    rm -f "$TMP_DIR/cmp_mini.json" "$TMP_DIR/cmp_trunc.json"
+else
+    echo "  [SKIP] malformed-compare tests (needs python3 + t_json report)" | tee -a "$REPORT"
+fi
 # Test: independent recount matches LPTA initial metrics on every shipped input
 if command -v python3 &>/dev/null && [ -f tests/count_ir.py ]; then
     SWEEP_PASS=0
