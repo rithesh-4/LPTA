@@ -140,14 +140,14 @@ bash run_lpta.sh input.ll
 
 The dashboard is static HTML — **must be served via HTTP** (fetch fails on `file://`).
 
-#### Option A: Bundled server (recommended, enables AI)
+#### Option A: Bundled server (recommended — enables AI + Compare tab)
 ```bash
 cd report
 python ../serve_dashboard.py . -p 8080
 # Open http://localhost:8080
 ```
 
-#### Option B: Python stdlib (no AI)
+#### Option B: Python stdlib (no AI, no Compare tab — use `--compare` CLI instead)
 ```bash
 cd report
 python -m http.server 8080
