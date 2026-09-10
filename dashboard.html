@@ -341,6 +341,27 @@ canvas.sparkline{width:100%;height:80px;display:block}
 /* SCROLLBAR */
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border-light);border-radius:3px}::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}
 
+/* FLOW (diagram-design trial: Sankey + dependency, editorial, no shadows) */
+.flow-wrap{display:flex;flex-direction:column;gap:14px}
+.flow-banner{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:18px 22px;font-size:12.5px;color:var(--text-secondary);line-height:1.7}
+.flow-banner strong{color:var(--text-primary)}
+.flow-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:14px}
+@media(max-width:900px){.flow-grid{grid-template-columns:1fr}}
+.flow-card{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:18px 20px}
+.flow-card h4{font-size:12px;font-weight:700;margin-bottom:4px}
+.flow-card .hint{font-size:10.5px;color:var(--text-muted)}
+.flow-bar-row{display:flex;align-items:center;gap:10px;margin:8px 0;font-size:11px}
+.flow-bar-name{width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'JetBrains Mono',monospace;color:var(--text-secondary)}
+.flow-bar-track{flex:1;height:10px;background:rgba(255,255,255,.05);border-radius:5px;overflow:hidden}
+.flow-bar-fill{height:100%;border-radius:5px}
+.flow-bar-fill.neg{background:var(--green)}.flow-bar-fill.pos{background:var(--red)}
+.flow-bar-val{width:90px;text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text-primary)}
+.flow-chain{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px;font-size:11px}
+.flow-node{border:1px solid var(--border);border-radius:8px;padding:6px 10px;background:var(--bg-tertiary);font-family:'JetBrains Mono',monospace;color:var(--text-secondary)}
+.flow-node.neg{border-color:var(--green);color:var(--green)}
+.flow-node.pos{border-color:var(--red);color:var(--red)}
+.flow-arrow{color:var(--text-muted)}
+
 /* MOBILE */
 @media(max-width:900px){.sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}.main{margin-left:0}.stat-grid{grid-template-columns:repeat(2,1fr)}.page{padding:16px}.overview-charts,.pipe-stats{grid-template-columns:1fr}}
 
@@ -414,6 +435,10 @@ canvas.sparkline{width:100%;height:80px;display:block}
     <button class="nav-item" data-page="compare" onclick="goTo('compare')">
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3"/><path d="M3 9a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3"/><path d="M9 15h6"/><path d="M9 9h6"/></svg>
       Compare<span class="nav-hint">5</span>
+    </button>
+    <button class="nav-item" data-page="flow" onclick="goTo('flow')">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h6l-2-2m2 10l2-2m-2 2l-2-2m2 2h10"/><path d="M4 12h10l-2-2m2 6l2-2m-2 2l-2-2m2 2H4"/></svg>
+      Flow<span class="nav-hint">6</span>
     </button>
   </div>
   <div class="sidebar-footer">
@@ -505,6 +530,17 @@ canvas.sparkline{width:100%;height:80px;display:block}
       <div class="compare-results" id="compare-results" style="display:none"></div>
     </div>
   </div>
+  <!-- FLOW (trial) -->
+  <div class="page" id="page-flow">
+    <div class="page-header reveal"><h2>Flow</h2><p>Trial view (diagram-design inspired): where instruction count flows — Sankey split of top changers + execution-order dependency chain. No new data source; derived from the same events.</p></div>
+    <div class="flow-wrap">
+      <div class="flow-banner reveal" id="flow-summary"></div>
+      <div class="flow-grid">
+        <div class="flow-card reveal"><h4>Top changers by |Δ instructions|</h4><span class="hint">after-events only · width ∝ share of total moved</span><div id="flow-sankey"></div></div>
+        <div class="flow-card reveal"><h4>Execution-order chain</h4><span class="hint">same top passes, in pipeline order</span><div class="flow-chain" id="flow-deps"></div></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- IR DIFF MODAL -->
@@ -577,6 +613,7 @@ function goTo(page){
   setTimeout(()=>triggerReveals(),40);
   if(page==='pipeline')setTimeout(()=>{renderPipeStats();renderChart();renderPipelineCharts()},80);
   if(page==='overview')setTimeout(()=>renderOverviewCharts(),80);
+  if(page==='flow')setTimeout(()=>renderFlow(),80);
   history.replaceState(null,'','#'+page);
 }
 
@@ -646,7 +683,7 @@ function render(){
   // Any single render path throwing (e.g. malformed foreign JSON that
   // passed the shape check) must not leave a half-drawn dashboard.
   try{
-    renderOverview();renderFunctions();renderPasses();triggerReveals();
+    renderOverview();renderFunctions();renderPasses();renderFlow();triggerReveals();
   }catch(err){
     loadError('This history.json could not be rendered ('+esc(err.message||'unknown error')+'). Re-run <code>lpta_test</code> to regenerate it.');
     return;
@@ -654,7 +691,7 @@ function render(){
   aiInitSessions();
   // URL routing
   const h=location.hash.replace('#','');
-  if(['overview','pipeline','functions','passes','compare'].includes(h)&&h!==currentPage)goTo(h);
+  if(['overview','pipeline','functions','passes','compare','flow'].includes(h)&&h!==currentPage)goTo(h);
   else if(!currentPage)goTo('overview');
 }
 
@@ -1208,6 +1245,56 @@ function renderPipelineCharts(){
   },100);
 }
 
+// ===== FLOW (trial, diagram-design inspired) =====
+// Pure derivation from D.events: no new data source, no external libs, no
+// canvas (innerHTML + inline SVG only so headless smoke stubs keep working).
+// Sankey idiom: left = before total, middle = top changers split by share,
+// right = after total. Dependency idiom: same passes in execution order.
+function renderFlow(){
+  const sumEl=document.getElementById('flow-summary');
+  const sanEl=document.getElementById('flow-sankey');
+  const depEl=document.getElementById('flow-deps');
+  if(!sumEl||!sanEl||!depEl)return;
+  if(!D||!D.events){sumEl.innerHTML='';sanEl.innerHTML='';depEl.innerHTML='';return;}
+  const s=D.summary||{};
+  const beforeTot=s.total_instructions_before, afterTot=s.total_instructions_after;
+  const rows=D.events.filter(e=>e.event_type==='after').map(e=>{
+    const b=e.metrics_before?.instruction_count, a=e.metrics_after?.instruction_count;
+    if(b==null||a==null)return null;
+    return{id:e.id,pass:e.pass_name,unit:e.ir_name,delta:a-b};
+  }).filter(r=>r&&r.delta!==0);
+  rows.sort((x,y)=>Math.abs(y.delta)-Math.abs(x.delta));
+  const top=rows.slice(0,8);
+  const moved=top.reduce((t,r)=>t+Math.abs(r.delta),0);
+  const net=(beforeTot!=null&&afterTot!=null)?(afterTot-beforeTot):null;
+  const topName=top.length?top[0].pass:'—';
+  sumEl.innerHTML=`<strong>${top.length}</strong> passes with instruction deltas shown`
+    + (net!=null?` · whole-module <strong>${beforeTot} → ${afterTot}</strong> (${net>0?'+':''}${net})`:` (module totals unavailable)`)
+    + (top.length?` · largest contributor: <strong>${esc(topName)}</strong> (${top[0].delta>0?'+':''}${top[0].delta})`:` · no measurable instruction deltas`)
+    + `<br><span style="font-size:11px">Derived from the same after-events as Pass Explorer; "Changed" keeps its existing meaning (counters or IR text).</span>`;
+  if(!top.length){
+    sanEl.innerHTML='<div style="padding:24px;color:var(--text-muted);font-size:11px">No instruction deltas to flow.</div>';
+    depEl.innerHTML='';
+    return;
+  }
+  sanEl.innerHTML=top.map(r=>{
+    const share=moved?Math.max(2,Math.round(Math.abs(r.delta)/moved*100)):0;
+    const cls=r.delta<0?'neg':'pos';
+    const sign=r.delta>0?'+':'';
+    return `<div class="flow-bar-row" title="${esc(r.pass)} on ${esc(r.unit)}: ${sign}${r.delta} instructions">`
+      + `<span class="flow-bar-name">${esc(r.pass)}</span>`
+      + `<span class="flow-bar-track"><span class="flow-bar-fill ${cls}" style="display:block;width:${share}%"></span></span>`
+      + `<span class="flow-bar-val">${sign}${r.delta}</span></div>`;
+  }).join('');
+  const ordered=top.slice().sort((a,b)=>a.id-b.id);
+  depEl.innerHTML=ordered.map((r,i)=>{
+    const cls=r.delta<0?'neg':'pos';
+    const sign=r.delta>0?'+':'';
+    return (i?'<span class="flow-arrow">→</span>':'')
+      + `<span class="flow-node ${cls}" title="#${r.id} ${esc(r.pass)} (${sign}${r.delta})">${esc(r.pass)} (${sign}${r.delta})</span>`;
+  }).join('');
+}
+
 // ===== CHART =====
 function renderChart(){
   if(!D||!D.events||!D.events.length)return;const canvas=document.getElementById('timeline-canvas');if(!canvas)return;
@@ -1400,6 +1487,7 @@ document.addEventListener('keydown',e=>{
   if(e.key==='3')goTo('functions');
   if(e.key==='4')goTo('passes');
   if(e.key==='5')goTo('compare');
+  if(e.key==='6')goTo('flow');
   if(e.key==='/'){e.preventDefault();document.getElementById('search').focus();goTo('passes')}
 });
 
