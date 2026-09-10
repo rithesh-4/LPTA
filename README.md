@@ -352,16 +352,15 @@ After running LPTA on `input.ll` with output dir `report/`:
 ```
 report/
 ├── history.json          # Main output — all events, metrics, IR diffs
-├── index.html            # Dashboard (copy of dashboard.html)
+├── index.html            # Dashboard (copy of dashboard.html; run_lpta.sh only)
 ├── ir_before_opt.ll      # Module IR before pipeline
 ├── ir_after_opt.ll       # Module IR after pipeline
-├── codegen_before/       # Assembly before (per target)
-│   └── *.s
-├── codegen_after/        # Assembly after (per target)
-│   └── *.s
+├── codegen_before.s      # Assembly before (native target)
+├── codegen_after.s       # Assembly after (native target)
+├── codegen_<triple>_before.s / _after.s  # Per-target assembly (--targets)
 └── ir/                   # Per-pass IR snapshots (if --snapshots)
-    ├── pass_1_before.ll
-    ├── pass_1_after.ll
+    ├── pass_<id>_<Pass>_<Module|Function|Loop>_<name>_before.ll
+    ├── pass_<id>_<Pass>_<Module|Function|Loop>_<name>_after.ll
     └── ...
 ```
 
@@ -383,8 +382,8 @@ cd report && python ../serve_dashboard.py . -p 8080
 ### Summary Cards
 - Total before/after/invalidated events
 - Passes that produced measurable changes
-- **IR instruction reduction** (e.g., 368 → 155, -58%)
-- **Codegen size reduction** (e.g., 542 → 444 assembly lines, -18%)
+- **IR instruction change** (e.g., 368 → 265, -28% on `real_test.ll -O2`)
+- **Codegen size change** (e.g., 502 → 573 assembly lines, +14% — size is a proxy, not a verdict)
 
 ### Pipeline Story
 Natural language summary of what the optimization pipeline did.
@@ -462,7 +461,7 @@ Object size measurement uses `llc` to compile before/after IR to assembly, then 
 Tracing cost scales with pass executions × IR size (every pass is measured before/after). Measured on this machine:
 | Input | Flags | Time | `history.json` |
 |---|---|---|---|
-| `real_test.ll` (368 instr) | `-O2 --snapshots` | ~3.4 s | ~2 MB |
+| `real_test.ll` (368 instr) | `-O2 --snapshots` | ~2.0 s | ~2.8 MB |
 | synthetic 2000 fns (26k instr) | `-O2` | ~21 s | ~420 MB (404k events) |
 | same | `-O2 --no-ir-hash` | ~14 s | same volume, no IR-change signal |
 
@@ -489,18 +488,18 @@ LPTA meters three IR units — **Module**, **Function**, **Loop** — with full 
 
 ```
 real_test.ll with -O2:
-  2,196 pass events tracked
-  237 passes produced measurable changes
+  2,200 pass events tracked
+  252 passes produced measurable changes
   91 unique pass names observed
 
-  IR Instructions:  368 → 155  (58% reduction)
-  Codegen Assembly: 542 → 444 lines  (18% reduction)
+  IR Instructions:  368 → 265  (28% reduction)
+  Codegen Assembly: 502 → 573 lines  (14% increase)
 
   Top passes by impact:
-    SROAPass:         -89 instructions (15x)
-    EarlyCSEPass:     -42 instructions (9x)
-    SimplifyCFGPass:  -28 instructions (12x)
-    InstCombinePass:  -18 instructions (8x)
+    SROAPass:         -192 instructions (9x)
+    ModuleToFunctionPassAdaptor: -121 instructions (3x)
+    SimplifyCFGPass:  -81 instructions (31x)
+    InstCombinePass:  -31 instructions (18x)
 ```
 
 ## How to Prove Correctness
