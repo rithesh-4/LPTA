@@ -15,6 +15,7 @@ set -u
 
 BUILD_DIR="${1:-./build}"
 EXE="$BUILD_DIR/lpta_test.exe"
+[ -x "$EXE" ] || EXE="${EXE%.exe}"  # Linux builds lack the .exe suffix (Jules QA)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Run from the repo root: lpta_test is a Windows binary and cannot open
 # WSL-style /mnt/c absolute paths, so everything below stays relative.

@@ -38,6 +38,11 @@ Generates structured JSON + interactive HTML dashboard
 - Ninja (required by `run_lpta.sh`; direct CMake builds may use other generators)
 - A C++17 compiler (Clang recommended)
 - Windows: Git Bash / MSYS2 (for `bash run_lpta.sh`, tests)
+- Linux (community-verified on Ubuntu 24.04): LLVM 22 from `apt.llvm.org`
+  (`llvm-22`, `llvm-22-dev`, `clang-22`, `lld-22`) plus `libzstd-dev`,
+  `libedit-dev`, `libcurl4-openssl-dev`; test scripts resolve the extensionless
+  `build/lpta_test` binary automatically. Native build is Windows-first;
+  `src/Codegen.cpp` includes `<unistd.h>` on POSIX for `readlink` discovery.
 
 > **Where LLVM comes from:** this workspace ships a prebuilt
 > `clang+llvm-22.1.8-x86_64-pc-windows-msvc/` toolchain that `run_lpta.sh` and
@@ -414,9 +419,65 @@ Aggregated view showing which pass types had the most effect.
 
 ## Architecture
 
-> **Visual walkthrough:** see [docs/architecture/DATA_FLOW.md](docs/architecture/DATA_FLOW.md) —
-> Mermaid diagrams of the end-to-end pipeline, one pass execution (why tracking uses a stack),
-> and a file-level call map. Annotated repository map: [docs/architecture/PROJECT_MAP.md](docs/architecture/PROJECT_MAP.md).
+> **Visual walkthrough:** the two diagrams below are mirrored from
+> [docs/architecture/DATA_FLOW.md](docs/architecture/DATA_FLOW.md) (which also holds a
+> third diagram — the file-level call map). Annotated repository map:
+> [docs/architecture/PROJECT_MAP.md](docs/architecture/PROJECT_MAP.md).
+> Keep the copies in sync: edit `docs/architecture/DATA_FLOW.md` first, then mirror here.
+
+### End-to-end data flow
+
+Blue = build/run steps, green = data artifacts, orange = the instrumentation
+layer that makes LPTA what it is.
+
+```mermaid
+flowchart TD
+    subgraph INPUT["Input preparation"]
+        C["real_test.c"] -->|"clang -emit-llvm -S"| LL[("real_test.ll")]
+    end
+
+    subgraph LPTA["build/lpta_test.exe"]
+        PARSE["parseIRFile<br/>(main.cpp)"] --> MOD["llvm::Module"]
+        MOD --> PB["PassBuilder.buildPerModuleDefaultPipeline(-O2)<br/>+ PassInstrumentationCallbacks"]
+
+        subgraph INSTR["Instrumentation (the core idea)"]
+            direction LR
+            DET["Detection.cpp<br/>detectIR(Any) + FNV-1a IR hash<br/>→ kind + name + metrics"] --> MET["Metrics.cpp<br/>capture*Metrics()<br/>10 counters + 8 opcode groups"]
+        end
+
+        PB -->|"BEFORE callback"| PUSH["push PassFrame onto pass_stack<br/>+ 'before' Event → g_events"]
+        PUSH --> RUN["the pass actually runs"]
+        RUN -->|"AFTER callback"| POP["match + pop frame by name & IR pointer<br/>compute delta → 'after' Event"]
+        RUN -.->|"loop deleted"| INV["INVALIDATED callback<br/>(fires instead of AFTER)"]
+        DET -.-> PUSH
+        DET -.-> POP
+    end
+
+    LL --> PARSE
+
+    subgraph OUTPUT["Artifacts in report dir"]
+        JSON[("history.json")]
+        IRO[("ir_before_opt.ll / ir_after_opt.ll")]
+        SNAP[("ir/pass_&lt;id&gt;_&lt;pass&gt;_before.ll ...")]
+        DASH["dashboard.html → index.html"]
+    end
+
+    MOD -->|"print()"| IRO
+    POP -->|"g_events"| JSON
+    PUSH -->|"if shouldSnapshot + under kMaxSnapshotBytes"| SNAP
+    RUN -->|"if changed + allowlisted + pair fits cap"| SNAP
+
+    IRO -->|"llc ×2 (Codegen.cpp)"| ASM["asm line/byte counts<br/>(CodegenResult)"]
+    ASM --> JSON
+
+    JSON --> SERVE["python -m http.server 8080"]
+    DASH --> SERVE
+    SERVE --> BROWSER["Browser dashboard<br/>fetch()es history.json<br/>timeline · diffs · impact tables"]
+```
+
+Key point: `pass_stack` is **transient** (alive only during `MPM.run`),
+`g_events` is the **accumulated record**, and `history.json` is its
+**serialization**. The dashboard never sees the stack — only events.
 
 ```
 inc/ + src/             ← Modular C++ implementation (9 files)
@@ -445,6 +506,40 @@ dashboard.html         ← Self-contained HTML/CSS/JS dashboard
 
 ### Stack-based Pass Tracking
 LLVM's pass pipeline is hierarchical (Module → Function → Loop). Passes nest inside adaptors. A single "current pass" variable would be overwritten by inner passes. LPTA uses a **stack** of `PassFrame` objects to correctly match BEFORE/AFTER events across nesting.
+
+```mermaid
+sequenceDiagram
+    participant PM as LLVM PassManager
+    participant CB as LPTA callbacks (main.cpp)
+    participant ST as pass_stack
+    participant EV as g_events
+
+    PM->>CB: BEFORE "ModuleToFunctionPassAdaptor" (Module)
+    CB->>CB: detectIR → metrics snapshot
+    CB->>ST: push frame {depth=0}
+    CB->>EV: push "before" event
+
+    PM->>CB: BEFORE "SimplifyCFGPass" (Function entry)
+    CB->>ST: push frame {depth=1}
+    CB->>EV: push "before" event
+
+    Note over PM: SimplifyCFG mutates the function
+
+    PM->>CB: AFTER "SimplifyCFGPass"
+    CB->>ST: find topmost frame matching name + ir_ptr, pop
+    CB->>CB: delta = before vs after metrics
+    CB->>EV: push "after" event (+ IR diff if changed)
+
+    PM->>CB: AFTER "ModuleToFunctionPassAdaptor"
+    CB->>ST: pop outer frame (depth back to 0)
+    CB->>EV: push "after" event
+
+    Note over CB,EV: Invariant: when MPM.run() returns,<br/>stack must be empty → "Stack remaining: 0"
+```
+
+Why a stack, not a "current pass" variable: with nesting, the variable would be
+overwritten by inner passes and blame the wrong one. (Mirrored from
+[docs/architecture/DATA_FLOW.md](docs/architecture/DATA_FLOW.md) — keep in sync.)
 
 ### Metrics, Not Interpretation
 LPTA counts structural properties (instructions, blocks, calls, etc.) — it does **not** claim fewer instructions = better performance. The regression score is a heuristic indicator, not ground truth (see formula below).
@@ -547,6 +642,15 @@ The C++ source code contains `assert()` statements that verify counting invarian
 ```bash
 bash tests/run_all_tests.sh build/   # Run full test suite
 ```
+
+### 8. Independent Reproduction
+
+An independent QA pass on a clean Ubuntu 24.04 VM (stock LLVM 22 toolchain)
+reproduced the pipeline end-to-end: 87/87 unit tests, all CTest gates,
+41/41 full-suite phases (incl. 300-iteration fuzz), plus custom C programs
+through `-O2 --snapshots`, `--no-ir-hash`, `--compare`, and the dashboard
+server — all passing. That review also fixed two portability gaps: the POSIX
+`<unistd.h>` include and `.exe`-less binary resolution in test scripts.
 
 ## License
 

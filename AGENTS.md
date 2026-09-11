@@ -43,7 +43,7 @@ Instrumentation tool (**not** upstream LLVM source): runs the `opt` pipeline on 
 - Compare gates (both must pass before merging any compare change): `bash tests/compare_golden.sh build/` (12 fixtures, byte-equivalent normalized output) + `bash tests/compare_parity.sh build/` (CLI vs `serve_dashboard.py /api/compare`)
 - Node-gated checks (`tests/dashboard_smoke.js`, Playwright `dashboard_browser.js`) SKIP without node — not failures
 - Unit tests only: `build/test_utilities.exe`
-- Scripts hardcode `.exe` — keep binary names `lpta_test.exe` / `test_utilities.exe`
+- Scripts resolve binaries with `.exe`-first fallback (`[ -x "$EXE" ] || EXE="${EXE%.exe}"`) — Windows behavior unchanged, Linux builds use the bare name. Keep binary names `lpta_test` / `test_utilities` (+ `.exe` on Windows)
 
 ## Invariants (don't regress — edge-case tests enforce these)
 

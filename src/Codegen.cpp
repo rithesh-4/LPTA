@@ -14,6 +14,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <unistd.h> // readlink() for /proc/self/exe discovery (FIX: Jules Linux QA)
 #endif
 
 using namespace llvm;

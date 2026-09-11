@@ -21,6 +21,9 @@ TMP_DIR="$BUILD_DIR/test_tmp"
 mkdir -p "$TMP_DIR"
 EXE="$BUILD_DIR/lpta_test.exe"
 TEST_EXE="$BUILD_DIR/test_utilities.exe"
+# Linux builds lack the .exe suffix — fall back to the bare name (Jules QA).
+[ -x "$EXE" ] || EXE="${EXE%.exe}"
+[ -x "$TEST_EXE" ] || TEST_EXE="${TEST_EXE%.exe}"
 REPORT="tests/test_report.txt"
 PASS_COUNT=0
 FAIL_COUNT=0

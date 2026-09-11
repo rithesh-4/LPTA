@@ -14,6 +14,7 @@ set -u
 
 BUILD_DIR="${1:-./build}"
 EXE="$BUILD_DIR/lpta_test.exe"
+[ -x "$EXE" ] || EXE="${EXE%.exe}"  # Linux builds lack the .exe suffix (Jules QA)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TMP="$BUILD_DIR/parity_tmp"
 PORT=18123

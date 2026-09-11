@@ -17,6 +17,7 @@ set -u
 BUILD_DIR="${1:-./build}"
 TEST_FILE="${2:-test.ll}"
 EXE="$BUILD_DIR/lpta_test.exe"
+[ -x "$EXE" ] || EXE="${EXE%.exe}"  # Linux builds lack the .exe suffix (Jules QA)
 REPORT="tests/correctness_report.txt"
 OUT_DIR="$BUILD_DIR/lpta_validate"
 OUT_DIR_2="$BUILD_DIR/lpta_validate_run2"
