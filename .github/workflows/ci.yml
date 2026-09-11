@@ -7,16 +7,14 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: bash
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Ninja
-        run: choco install ninja -y --no-progress
-        shell: powershell
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libzstd-dev libedit-dev libcurl4-openssl-dev ninja-build
 
       - name: Install LLVM
         uses: KyleMayes/install-llvm-action@v2
@@ -24,7 +22,7 @@ jobs:
           version: "18.1.8"
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja "-DLLVM_DIR=$LLVM_PATH/lib/cmake/llvm"
+        run: cmake -S . -B build -G Ninja -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm" -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
 
       - name: Build
         run: cmake --build build
