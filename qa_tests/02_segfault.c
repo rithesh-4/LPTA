@@ -2,7 +2,7 @@
 
 int main(void) {
     int *p = NULL;
-    *p = 42; // Intentionally triggers SIGSEGV / UB
+    *p = 42; // Intentionally triggers UB/segfault
     printf("Value: %d\n", *p);
     return 0;
 }

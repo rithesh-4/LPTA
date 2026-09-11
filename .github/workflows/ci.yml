@@ -7,28 +7,29 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install System Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libzstd-dev libedit-dev libcurl4-openssl-dev ninja-build
-
-      - name: Install LLVM
-        uses: KyleMayes/install-llvm-action@v2
-        with:
-          version: "18.1.8"
+      - name: Install LLVM and Ninja
+        run: choco install llvm ninja -y --no-progress
+        shell: powershell
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm" -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
+        run: >
+          cmake -S . -B build -G Ninja
+          "-DLLVM_DIR=C:/Program Files/LLVM/lib/cmake/llvm"
 
       - name: Build
         run: cmake --build build
 
       - name: Fast tests (unit + proof + cross-validation)
         run: |
+          export LLVM_DIR="C:/Program Files/LLVM"
+          export PATH="$LLVM_DIR/bin:$PATH"
           cd build && ctest --output-on-failure
         # Full suite (300-iteration fuzz) stays manual/scheduled:
         #   bash tests/run_all_tests.sh build/

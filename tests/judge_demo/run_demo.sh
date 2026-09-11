@@ -8,6 +8,7 @@
 set -e
 BUILD_DIR="${1:-build}"
 LPTA="$BUILD_DIR/lpta_test.exe"
+[ -x "$LPTA" ] || LPTA="${LPTA%.exe}"  # Linux builds lack the .exe suffix (Jules QA)
 DEMO_DIR="tests/judge_demo"
 DEMO_LL="$DEMO_DIR/demo.ll"
 DEMO_C="$DEMO_DIR/demo.c"

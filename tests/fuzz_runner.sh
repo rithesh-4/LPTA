@@ -10,6 +10,7 @@
 set -u
 
 EXE="${1:-./build/lpta_test.exe}"
+[ -x "$EXE" ] || EXE="${EXE%.exe}"  # Linux builds lack the .exe suffix (Jules QA)
 SEED="${2:-test.ll}"
 ITERATIONS="${3:-200}"
 TIMEOUT=30
