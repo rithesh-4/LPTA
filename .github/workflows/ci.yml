@@ -24,7 +24,7 @@ jobs:
           version: "18.1.8"
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja
+        run: cmake -S . -B build -G Ninja "-DLLVM_DIR=$LLVM_PATH/lib/cmake/llvm"
 
       - name: Build
         run: cmake --build build
