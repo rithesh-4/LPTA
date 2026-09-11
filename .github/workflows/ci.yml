@@ -7,28 +7,32 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: bash
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install LLVM and Ninja
-        run: choco install llvm ninja -y --no-progress
-        shell: powershell
+      - name: Install LLVM 22 and dependencies
+        run: |
+          sudo wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          sudo chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 22
+          sudo apt-get install -y llvm-22-dev clang-22 lld-22 ninja-build libzstd-dev libedit-dev libcurl4-openssl-dev
 
       - name: Configure
-        run: >
-          cmake -S . -B build -G Ninja
-          "-DLLVM_DIR=C:/Program Files/LLVM/lib/cmake/llvm"
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_C_COMPILER=clang-22 \
+            -DCMAKE_CXX_COMPILER=clang++-22 \
+            -DLLVM_DIR=/usr/lib/llvm-22/lib/cmake/llvm
 
       - name: Build
-        run: cmake --build build
+        run: |
+          cmake --build build
+          cd build && ln -sf lpta_test lpta_test.exe && ln -sf test_utilities test_utilities.exe
 
       - name: Fast tests (unit + proof + cross-validation)
         run: |
-          export LLVM_DIR="C:/Program Files/LLVM"
+          export LLVM_DIR="/usr/lib/llvm-22"
           export PATH="$LLVM_DIR/bin:$PATH"
           cd build && ctest --output-on-failure
         # Full suite (300-iteration fuzz) stays manual/scheduled:
