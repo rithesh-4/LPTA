@@ -15,13 +15,19 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install LLVM and Ninja
-        run: choco install llvm ninja -y --no-progress
+        run: |
+          choco install llvm ninja -y --no-progress --force
+          "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         shell: powershell
 
       - name: Configure
-        run: >
-          cmake -S . -B build -G Ninja
-          "-DLLVM_DIR=C:/Program Files/LLVM/lib/cmake/llvm"
+        shell: bash
+        run: |
+          LLVM_CMAKE_DIR="$(llvm-config --cmakedir 2>/dev/null || echo 'C:/Program Files/LLVM/lib/cmake/llvm')"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_C_COMPILER=clang-cl \
+            -DCMAKE_CXX_COMPILER=clang-cl \
+            "-DLLVM_DIR=$LLVM_CMAKE_DIR"
 
       - name: Build
         run: cmake --build build
