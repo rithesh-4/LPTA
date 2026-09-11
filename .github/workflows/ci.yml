@@ -14,22 +14,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install LLVM and Ninja
-        run: choco install llvm ninja -y --no-progress
+      - name: Install Ninja
+        run: choco install ninja -y --no-progress
         shell: powershell
 
+      - name: Install LLVM
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "18.1.8"
+
       - name: Configure
-        run: >
-          cmake -S . -B build -G Ninja
-          "-DLLVM_DIR=C:/Program Files/LLVM/lib/cmake/llvm"
+        run: cmake -S . -B build -G Ninja
 
       - name: Build
         run: cmake --build build
 
       - name: Fast tests (unit + proof + cross-validation)
         run: |
-          export LLVM_DIR="C:/Program Files/LLVM"
-          export PATH="$LLVM_DIR/bin:$PATH"
           cd build && ctest --output-on-failure
         # Full suite (300-iteration fuzz) stays manual/scheduled:
         #   bash tests/run_all_tests.sh build/
